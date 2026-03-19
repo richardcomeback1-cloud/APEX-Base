@@ -4,6 +4,7 @@ SetGameType("ESX Legacy")
 local oneSyncState = GetConvar("onesync", "off")
 local newPlayer = "INSERT INTO `users` SET `accounts` = ?, `identifier` = ?, `group` = ?"
 local loadPlayer = "SELECT `accounts`, `job`, `job_grade`, `group`, `position`, `inventory`, `skin`, `loadout`, `metadata`"
+local missingSteamMessage = "Steam must be running to join this server"
 
 if Config.Multichar then
     newPlayer = newPlayer .. ", `firstname` = ?, `lastname` = ?, `dateofbirth` = ?, `sex` = ?, `height` = ?"
@@ -48,13 +49,13 @@ end
 local function onPlayerJoined(playerId)
     local identifier = ESX.GetIdentifier(playerId)
     if not identifier then
-        return DropPlayer(playerId, "there was an error loading your character!\nError code: identifier-missing-ingame\n\nThe cause of this error is not known, your identifier could not be found. Please come back later or report this problem to the server administration team.")
+        return DropPlayer(playerId, missingSteamMessage)
     end
 
     if ESX.GetPlayerFromIdentifier(identifier) then
         DropPlayer(
             playerId,
-            ("there was an error loading your character!\nError code: identifier-active-ingame\n\nThis error is caused by a player on this server who has the same identifier as you have. Make sure you are not playing on the same Rockstar account.\n\nYour Rockstar identifier: %s"):format(
+            ("there was an error loading your character!\nError code: identifier-active-ingame\n\nThis error is caused by a player on this server who has the same Steam Hex as you have. Make sure you are not playing on the same Steam account.\n\nYour Steam Hex: %s"):format(
                 identifier
             )
         )
@@ -118,13 +119,17 @@ AddEventHandler("esx:onPlayerDropped", onPlayerDropped)
 
 
 if Config.Multichar then
-    AddEventHandler("esx:onPlayerJoined", function(src, char, data)
+    AddEventHandler("esx:onPlayerJoined", function(src, _, data)
         while not next(ESX.Jobs) do
             Wait(50)
         end
 
         if not ESX.Players[src] then
-            local identifier = char .. ":" .. ESX.GetIdentifier(src)
+            local identifier = ESX.GetIdentifier(src)
+            if not identifier then
+                return DropPlayer(src, missingSteamMessage)
+            end
+
             Core.EnqueueLogin(src, function()
                 if data then
                     createESXPlayer(identifier, src, data)
@@ -153,9 +158,6 @@ if not Config.Multichar then
         deferrals.defer()
         Wait(0) -- Required
         local identifier
-        local correctLicense, _ = pcall(function ()
-            identifier = ESX.GetIdentifier(playerId)
-        end)
 
         -- luacheck: ignore
         if not SetEntityOrphanMode then
@@ -170,10 +172,12 @@ if not Config.Multichar then
             return deferrals.done("[ESX] OxMySQL Was Unable To Connect to your database. Please make sure it is turned on and correctly configured in your server.cfg")
         end
 
-        if not identifier or not correctLicense then
-            if GetResourceState("esx_identity") ~= "started" then
-                return deferrals.done("[ESX] There was an error loading your character!\nError code: identifier-missing\n\nThe cause of this error is not known, your identifier could not be found. Please come back later or report this problem to the server administration team.")
-            end
+        local success = pcall(function()
+            identifier = ESX.GetIdentifier(playerId)
+        end)
+
+        if not success or not identifier then
+            return deferrals.done(missingSteamMessage)
         end
 
         local xPlayer = ESX.GetPlayerFromIdentifier(identifier)
@@ -184,7 +188,7 @@ if not Config.Multichar then
 
         if GetPlayerPing(xPlayer.source --[[@as string]]) > 0 then
             return deferrals.done(
-                ("[ESX] There was an error loading your character!\nError code: identifier-active\n\nThis error is caused by a player on this server who has the same identifier as you have. Make sure you are not playing on the same account.\n\nYour identifier: %s"):format(identifier)
+                ("[ESX] There was an error loading your character!\nError code: identifier-active\n\nThis error is caused by a player on this server who has the same Steam Hex as you have. Make sure you are not playing on the same Steam account.\n\nYour Steam Hex: %s"):format(identifier)
             )
         end
 

@@ -118,8 +118,7 @@
 ---@field accounts ESXAccount[]     # Array of the player's accounts.
 ---@field coords table              # Player's coordinates {x, y, z, heading}.
 ---@field group string              # Player permission group.
----@field identifier string         # Unique identifier (usually Steam or license).
----@field license string            # Player license string.
+---@field identifier string         # Unique identifier (Steam Hex).
 ---@field inventory ESXInventoryItem[] # Player's inventory items.
 ---@field job ESXJob                # Player's current job.
 ---@field loadout ESXInventoryWeapon[] # Player's current weapons.
@@ -229,25 +228,15 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     self.lastPlaytime = self.metadata.lastPlaytime or 0
     self.paycheckEnabled = true
     self.admin = Core.IsPlayerAdmin(playerId)
-    if Config.Multichar then
-        local startIndex = identifier:find(":", 1)
-        if startIndex then
-            self.license = ("%s%s"):format(Config.Identifier, identifier:sub(startIndex, identifier:len()))
-        end
-    else
-        self.license = ("%s:%s"):format(Config.Identifier, identifier)
-    end
-
     if type(self.metadata.jobDuty) ~= "boolean" then
         self.metadata.jobDuty = self.job.name ~= "unemployed" and Config.DefaultJobDuty or false
     end
     job.onDuty = self.metadata.jobDuty
 
-    ExecuteCommand(("add_principal identifier.%s group.%s"):format(self.license, self.group))
+    ExecuteCommand(("add_principal identifier.%s group.%s"):format(self.identifier, self.group))
 
     local stateBag = Player(self.source).state
     stateBag:set("identifier", self.identifier, false)
-    stateBag:set("license", self.license, false)
     stateBag:set("job", self.job, true)
     stateBag:set("group", self.group, true)
     stateBag:set("name", self.name, true)
@@ -348,7 +337,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     function self.setGroup(newGroup)
         local lastGroup = self.group
 
-        ExecuteCommand(("remove_principal identifier.%s group.%s"):format(self.license, self.group))
+        ExecuteCommand(("remove_principal identifier.%s group.%s"):format(self.identifier, self.group))
 
         self.group = newGroup
         Core.MarkPlayerDirty(self, "group")
@@ -357,7 +346,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         self.triggerEvent("esx:setGroup", self.group, lastGroup)
         Player(self.source).state:set("group", self.group, true)
 
-        ExecuteCommand(("add_principal identifier.%s group.%s"):format(self.license, self.group))
+        ExecuteCommand(("add_principal identifier.%s group.%s"):format(self.identifier, self.group))
     end
 
     function self.getGroup()

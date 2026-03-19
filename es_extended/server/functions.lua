@@ -432,21 +432,22 @@ function ESX.IsPlayerLoaded(source)
 end
 
 ---@param playerId number | string
----@return string, number
+---@return string?
 function ESX.GetIdentifier(playerId)
     local fxDk = GetConvarInt("sv_fxdkMode", 0)
     if fxDk == 1 then
-        return "ESX-DEBUG-LICENCE", 0
+        return "steam:esx-debug"
     end
 
     playerId = tostring(playerId)
+    local identifiers = GetPlayerIdentifiers(playerId)
 
-    local identifierType = Config.Identifier
-    local identifier = GetPlayerIdentifierByType(playerId, identifierType)
-
-    assert(identifier, ("[ESX] GetIdentifier failed: no identifier found for playerId %s with type '%s'"):format(playerId, identifierType))
-
-    return identifier:gsub(("%s:"):format(identifierType), "")
+    for i = 1, #identifiers do
+        local identifier = string.lower(identifiers[i])
+        if identifier:sub(1, 6) == "steam:" then
+            return identifier
+        end
+    end
 end
 
 ---@param model string|number
