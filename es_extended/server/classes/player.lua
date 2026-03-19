@@ -52,7 +52,8 @@
 ---@field setAccountMoney fun(accountName: string, money: number, reason?: string)  # Set specific account balance.
 ---@field addAccountMoney fun(accountName: string, money: number, reason?: string)  # Add money to an account.
 ---@field removeAccountMoney fun(accountName: string, money: number, reason?: string) # Remove money from an account.
----@field getAccount fun(account: string): ESXAccount?            # Get account data by name.
+---@field getAccount fun(account: string): ESXAccount             # Get account data by name.
+---@field getAccountMoney fun(accountName: string): number        # Get account balance by name.
 ---@field getAccounts fun(minimal?: boolean): ESXAccount[]|table<string,number>  # Get all accounts, optionally minimal.
 --- Inventory Functions
 ---@field getInventory fun(minimal?: boolean): ESXInventoryItem[]|table<string,number>  # Get inventory, optionally minimal.
@@ -115,7 +116,7 @@
 
 ---@class xPlayer:StaticPlayer
 --- Properties
----@field accounts ESXAccount[]     # Array of the player's accounts.
+---@field accounts table<string, ESXAccount> # Hashmap of the player's accounts.
 ---@field coords table              # Player's coordinates {x, y, z, heading}.
 ---@field group string              # Player permission group.
 ---@field identifier string         # Unique identifier (Steam Hex).
@@ -136,7 +137,7 @@
 ---@param playerId number
 ---@param identifier string
 ---@param group string
----@param accounts ESXAccount[]
+---@param accounts table<string, number|ESXAccount>|ESXAccount[]
 ---@param inventory table
 ---@param weight number
 ---@param job ESXJob
@@ -146,6 +147,56 @@
 ---@param metadata table
 ---@return xPlayer
 local stringLower = string.lower
+
+local function normalizeAccountName(accountName)
+    if type(accountName) ~= "string" then
+        return nil
+    end
+
+    return stringLower(accountName)
+end
+
+local function createAccountEntry(accountName, money, config, index)
+    return {
+        name = accountName,
+        money = money or 0,
+        label = config and config.label or accountName,
+        round = config and (config.round ~= false) or true,
+        index = index,
+    }
+end
+
+local function normalizeAccountsTable(rawAccounts)
+    local accounts = {}
+
+    if type(rawAccounts) ~= "table" then
+        return accounts
+    end
+
+    if #rawAccounts > 0 then
+        for i = 1, #rawAccounts do
+            local entry = rawAccounts[i]
+            if entry and entry.name then
+                accounts[normalizeAccountName(entry.name)] = entry.money or 0
+            end
+        end
+
+        return accounts
+    end
+
+    for accountName, value in pairs(rawAccounts) do
+        local normalizedName = normalizeAccountName(accountName)
+        if normalizedName then
+            if type(value) == "table" then
+                accounts[normalizedName] = value.money or value.amount or 0
+            else
+                accounts[normalizedName] = value or 0
+            end
+        end
+    end
+
+    return accounts
+end
 
 local function getItemLimit(itemName)
     local item = ESX.Items[itemName]
@@ -208,8 +259,10 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     ---@diagnostic disable-next-line: missing-fields
     local self = {} ---@type xPlayer
 
-    self.accounts = accounts
-    self.accountsByName = {}
+    self.accounts = {}
+    self.accountsByName = self.accounts
+    self.accountList = {}
+    self.accountArrayDirty = true
     self.coords = coords
     self.group = group
     self.identifier = identifier
@@ -241,8 +294,24 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     stateBag:set("group", self.group, true)
     stateBag:set("name", self.name, true)
 
-    for i = 1, #self.accounts do
-        self.accountsByName[stringLower(self.accounts[i].name)] = self.accounts[i]
+    local normalizedAccounts = normalizeAccountsTable(accounts)
+    local accountIndex = 0
+
+    for accountName, data in pairs(Config.Accounts) do
+        accountIndex += 1
+        self.accounts[accountName] = createAccountEntry(
+            accountName,
+            normalizedAccounts[accountName] or Config.StartingAccountMoney[accountName] or 0,
+            data,
+            accountIndex
+        )
+    end
+
+    for accountName, money in pairs(normalizedAccounts) do
+        if accountName and not self.accounts[accountName] then
+            accountIndex += 1
+            self.accounts[accountName] = createAccountEntry(accountName, money, Config.Accounts[accountName], accountIndex)
+        end
     end
 
     local inventoryCounts, inventoryMetadata = normalizeInventoryTable(inventory)
@@ -317,7 +386,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.getMoney()
-        return self.getAccount("money").money
+        return self.getAccountMoney("money")
     end
 
     function self.addMoney(money, reason)
@@ -364,25 +433,65 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.getAccounts(minimal)
-        if not minimal then
-            return self.accounts
+        if minimal then
+            local minimalAccounts = {}
+
+            for accountName, account in pairs(self.accounts) do
+                minimalAccounts[accountName] = account.money
+            end
+
+            return minimalAccounts
         end
 
-        local minimalAccounts = {}
-
-        for i = 1, #self.accounts do
-            minimalAccounts[self.accounts[i].name] = self.accounts[i].money
+        if not self.accountArrayDirty then
+            return self.accountList
         end
 
-        return minimalAccounts
+        local accountList = {}
+        local nextIndex = 0
+
+        for accountName in pairs(Config.Accounts) do
+            local account = self.accounts[accountName]
+            if account then
+                nextIndex += 1
+                account.index = nextIndex
+                accountList[nextIndex] = account
+            end
+        end
+
+        for accountName, account in pairs(self.accounts) do
+            if not Config.Accounts[accountName] then
+                nextIndex += 1
+                account.index = nextIndex
+                accountList[nextIndex] = account
+            end
+        end
+
+        self.accountList = accountList
+        self.accountArrayDirty = false
+
+        return self.accountList
     end
 
     function self.getAccount(account)
-        if type(account) ~= "string" then
-            return nil
+        local accountName = normalizeAccountName(account)
+        local cachedAccount = accountName and self.accounts[accountName]
+        if cachedAccount then
+            return cachedAccount
         end
 
-        return self.accountsByName[stringLower(account)]
+        return {
+            name = accountName or account,
+            money = 0,
+            label = "Unknown",
+            round = true,
+        }
+    end
+
+    function self.getAccountMoney(accountName)
+        local normalizedName = normalizeAccountName(accountName)
+        local account = normalizedName and self.accounts[normalizedName]
+        return account and account.money or 0
     end
 
     function self.getInventory(minimal)
@@ -458,26 +567,34 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
-        if money >= 0 then
-            local account = self.getAccount(accountName)
-
-            if account then
-                money = account.round and ESX.Math.Round(money) or money
-                account.money = money
-                if account.name == "money" then
-                    self.cache.money = money
-                end
-                Core.MarkPlayerDirty(self, "accounts")
-                Core.DebugCounter("account_mutations")
-
-                self.triggerEvent("esx:setAccountMoney", account)
-                TriggerEvent("esx:setAccountMoney", self.source, accountName, money, reason)
-            else
-                error(("Tried To Set Invalid Account ^5%s^1 For Player ^5%s^1!"):format(accountName, self.playerId))
-            end
-        else
+        if money < 0 then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
+            return false
         end
+
+        local normalizedName = normalizeAccountName(accountName)
+        if not normalizedName then
+            return false
+        end
+
+        local account = self.accounts[normalizedName]
+        if not account then
+            self.accountArrayDirty = true
+            account = createAccountEntry(normalizedName, 0, Config.Accounts[normalizedName], #self.accountList + 1)
+            self.accounts[normalizedName] = account
+        end
+
+        money = account.round and ESX.Math.Round(money) or money
+        account.money = money
+        if normalizedName == "money" then
+            self.cache.money = money
+        end
+        Core.MarkPlayerDirty(self, "accounts")
+        Core.DebugCounter("account_mutations")
+
+        self.triggerEvent("esx:setAccountMoney", account)
+        TriggerEvent("esx:setAccountMoney", self.source, normalizedName, money, reason)
+        return true
     end
 
     function self.addAccountMoney(accountName, money, reason)
@@ -486,25 +603,28 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
-        if money > 0 then
-            local account = self.getAccount(accountName)
-            if account then
-                money = account.round and ESX.Math.Round(money) or money
-                account.money = account.money + money
-                if account.name == "money" then
-                    self.cache.money = account.money
-                end
-                Core.MarkPlayerDirty(self, "accounts")
-                Core.DebugCounter("account_mutations")
-
-                self.triggerEvent("esx:setAccountMoney", account)
-                TriggerEvent("esx:addAccountMoney", self.source, accountName, money, reason)
-            else
-                error(("Tried To Set Add To Invalid Account ^5%s^1 For Player ^5%s^1!"):format(accountName, self.playerId))
-            end
-        else
+        if money <= 0 then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
+            return false
         end
+
+        local normalizedName = normalizeAccountName(accountName)
+        local account = normalizedName and self.accounts[normalizedName]
+        if not account then
+            return false
+        end
+
+        money = account.round and ESX.Math.Round(money) or money
+        account.money = account.money + money
+        if normalizedName == "money" then
+            self.cache.money = account.money
+        end
+        Core.MarkPlayerDirty(self, "accounts")
+        Core.DebugCounter("account_mutations")
+
+        self.triggerEvent("esx:setAccountMoney", account)
+        TriggerEvent("esx:addAccountMoney", self.source, normalizedName, money, reason)
+        return true
     end
 
     function self.removeAccountMoney(accountName, money, reason)
@@ -513,30 +633,31 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
-        if money > 0 then
-            local account = self.getAccount(accountName)
-
-            if account then
-                money = account.round and ESX.Math.Round(money) or money
-                if account.money < money then
-                    error(("Tried To Underflow Account ^5%s^1 For Player ^5%s^1!"):format(accountName, self.playerId))
-                    return
-                end
-                account.money = account.money - money
-                if account.name == "money" then
-                    self.cache.money = account.money
-                end
-                Core.MarkPlayerDirty(self, "accounts")
-                Core.DebugCounter("account_mutations")
-
-                self.triggerEvent("esx:setAccountMoney", account)
-                TriggerEvent("esx:removeAccountMoney", self.source, accountName, money, reason)
-            else
-                error(("Tried To Set Add To Invalid Account ^5%s^1 For Player ^5%s^1!"):format(accountName, self.playerId))
-            end
-        else
+        if money <= 0 then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
+            return false
         end
+
+        local normalizedName = normalizeAccountName(accountName)
+        local account = normalizedName and self.accounts[normalizedName]
+        if not account then
+            return false
+        end
+
+        money = account.round and ESX.Math.Round(money) or money
+        account.money = account.money - money
+        if account.money < 0 then
+            account.money = 0
+        end
+        if normalizedName == "money" then
+            self.cache.money = account.money
+        end
+        Core.MarkPlayerDirty(self, "accounts")
+        Core.DebugCounter("account_mutations")
+
+        self.triggerEvent("esx:setAccountMoney", account)
+        TriggerEvent("esx:removeAccountMoney", self.source, normalizedName, money, reason)
+        return true
     end
 
     function self.getInventoryItem(itemName)

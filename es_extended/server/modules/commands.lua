@@ -204,7 +204,7 @@ ESX.RegisterCommand(
     "setaccountmoney",
     "admin",
     function(xPlayer, args, showError)
-        if not args.playerId.getAccount(args.account) then
+        if not args.playerId.accounts[string.lower(args.account)] then
             return showError(TranslateCap("command_giveaccountmoney_invalid"))
         end
         args.playerId.setAccountMoney(args.account, args.amount, "Government Grant")
@@ -234,7 +234,7 @@ ESX.RegisterCommand(
     "giveaccountmoney",
     "admin",
     function(xPlayer, args, showError)
-        if not args.playerId.getAccount(args.account) then
+        if not args.playerId.accounts[string.lower(args.account)] then
             return showError(TranslateCap("command_giveaccountmoney_invalid"))
         end
         args.playerId.addAccountMoney(args.account, args.amount, "Government Grant")
@@ -264,7 +264,7 @@ ESX.RegisterCommand(
     "removeaccountmoney",
     "admin",
     function(xPlayer, args, showError)
-        if not args.playerId.getAccount(args.account) then
+        if not args.playerId.accounts[string.lower(args.account)] then
             return showError(TranslateCap("command_removeaccountmoney_invalid"))
         end
         args.playerId.removeAccountMoney(args.account, args.amount, "Government Tax")

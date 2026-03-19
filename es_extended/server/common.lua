@@ -165,7 +165,7 @@ function Core.BindPlayerCache(xPlayer)
         identifier = xPlayer.identifier,
         money = 0,
         accounts = xPlayer.accounts,
-        accountLookup = xPlayer.accountsByName,
+        accountLookup = xPlayer.accounts,
         job = xPlayer.job,
         inventory = xPlayer.inventory,
         inventoryList = xPlayer.inventoryList,
@@ -184,7 +184,7 @@ function Core.BindPlayerCache(xPlayer)
         nextInventorySyncAt = 0,
     }
 
-    local account = xPlayer.accountsByName.money
+    local account = xPlayer.accounts.money
     cache.money = account and account.money or 0
 
     xPlayer.cache = cache

@@ -48,16 +48,21 @@ Core.PlayerFunctionOverrides.OxInventory = {
             if money < 0 then return end
             local account = self.getAccount(accountName)
 
-            if not account then return end
+            if not self.accounts[account.name] then return false end
 
             money = account.round and ESX.Math.Round(money) or money
-            self.accounts[account.index].money = money
+            account.money = money
+            if account.name == "money" then
+                self.cache.money = money
+            end
+            Core.MarkPlayerDirty(self, "accounts")
 
             self.triggerEvent("esx:setAccountMoney", account)
             TriggerEvent("esx:setAccountMoney", self.source, accountName, money, reason)
             if Inventory.accounts[accountName] then
                 Inventory.SetItem(self.source, accountName, money)
             end
+            return true
         end
     end,
 
@@ -67,15 +72,20 @@ Core.PlayerFunctionOverrides.OxInventory = {
             if money < 1 then return end
 
             local account = self.getAccount(accountName)
-            if not account then return end
+            if not self.accounts[account.name] then return false end
 
             money = account.round and ESX.Math.Round(money) or money
-            self.accounts[account.index].money = self.accounts[account.index].money + money
+            account.money = account.money + money
+            if account.name == "money" then
+                self.cache.money = account.money
+            end
+            Core.MarkPlayerDirty(self, "accounts")
             self.triggerEvent("esx:setAccountMoney", account)
             TriggerEvent("esx:addAccountMoney", self.source, accountName, money, reason)
             if Inventory.accounts[accountName] then
                 Inventory.AddItem(self.source, accountName, money)
             end
+            return true
         end
     end,
 
@@ -85,15 +95,23 @@ Core.PlayerFunctionOverrides.OxInventory = {
             if money < 1 then return end
 
             local account = self.getAccount(accountName)
-            if not account then return end
+            if not self.accounts[account.name] then return false end
 
             money = account.round and ESX.Math.Round(money) or money
-            self.accounts[account.index].money = self.accounts[account.index].money - money
+            account.money = account.money - money
+            if account.money < 0 then
+                account.money = 0
+            end
+            if account.name == "money" then
+                self.cache.money = account.money
+            end
+            Core.MarkPlayerDirty(self, "accounts")
             self.triggerEvent("esx:setAccountMoney", account)
             TriggerEvent("esx:removeAccountMoney", self.source, accountName, money, reason)
             if Inventory.accounts[accountName] then
                 Inventory.RemoveItem(self.source, accountName, money)
             end
+            return true
         end
     end,
 

@@ -224,17 +224,35 @@ function loadESXPlayer(identifier, playerId, isNew)
         local accounts = result.accounts
         accounts = (accounts and accounts ~= "") and json.decode(accounts) or {}
 
-        for account, data in pairs(Config.Accounts) do
-            data.round = data.round or data.round == nil
+        local normalizedAccounts = {}
+        if #accounts > 0 then
+            for i = 1, #accounts do
+                local account = accounts[i]
+                if account and account.name then
+                    normalizedAccounts[string.lower(account.name)] = account.money or 0
+                end
+            end
+        else
+            for accountName, money in pairs(accounts) do
+                if type(accountName) == "string" then
+                    if type(money) == "table" then
+                        normalizedAccounts[string.lower(accountName)] = money.money or money.amount or 0
+                    else
+                        normalizedAccounts[string.lower(accountName)] = money or 0
+                    end
+                end
+            end
+        end
+        accounts = normalizedAccounts
 
-            local index = #userData.accounts + 1
-            userData.accounts[index] = {
-                name = account,
-                money = accounts[account] or Config.StartingAccountMoney[account] or 0,
-                label = data.label,
-                round = data.round,
-                index = index,
-            }
+        for account in pairs(Config.Accounts) do
+            userData.accounts[account] = accounts[account] or Config.StartingAccountMoney[account] or 0
+        end
+
+        for accountName, money in pairs(accounts) do
+            if userData.accounts[accountName] == nil then
+                userData.accounts[accountName] = money or 0
+            end
         end
 
         -- Job
