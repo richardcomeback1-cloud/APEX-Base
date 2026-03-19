@@ -13,6 +13,7 @@ Core.playersByIdentifier = {}
 Core.JobsLoaded = false
 Core.PlayerCache = {}
 Core.SaveQueue = {}
+Core.WriteQueue = { players = Core.SaveQueue, interval = Config.SaveInterval }
 Core.ActiveInventorySync = {}
 Core.LoginQueue = { head = 1, tail = 0, items = {} }
 Core.EventThrottle = {}
@@ -39,7 +40,7 @@ end
 local function StartDBSync()
     CreateThread(function()
         while true do
-            Wait(Config.SaveInterval)
+            Wait(Core.WriteQueue.interval)
             Core.SavePlayers()
         end
     end)
@@ -164,14 +165,16 @@ function Core.BindPlayerCache(xPlayer)
     local cache = {
         identifier = xPlayer.identifier,
         money = 0,
-        accounts = xPlayer.accounts,
-        accountLookup = xPlayer.accounts,
-        job = xPlayer.job,
-        inventory = xPlayer.inventory,
+        state = xPlayer.state,
+        accounts = xPlayer.state.money,
+        accountLookup = xPlayer.state.money,
+        job = xPlayer.state.job,
+        inventory = xPlayer.state.inventory,
         inventoryList = xPlayer.inventoryList,
-        metadata = xPlayer.metadata,
-        dirtyFlags = {
-            accounts = false,
+        metadata = xPlayer.state.metadata,
+        lastSync = 0,
+        dirty = {
+            money = false,
             group = false,
             inventory = false,
             job = false,
@@ -183,12 +186,13 @@ function Core.BindPlayerCache(xPlayer)
         pendingInventorySync = {},
         nextInventorySyncAt = 0,
     }
+    cache.dirtyFlags = cache.dirty
 
-    local account = xPlayer.accounts.money
+    local account = xPlayer.state.money.money
     cache.money = account and account.money or 0
 
     xPlayer.cache = cache
-    xPlayer.dirtyFlags = cache.dirtyFlags
+    xPlayer.dirtyFlags = cache.dirty
     Core.PlayerCache[xPlayer.source] = cache
 
     return cache
@@ -200,8 +204,12 @@ function Core.MarkPlayerDirty(xPlayer, flag)
         return
     end
 
+    if flag == "accounts" then
+        flag = "money"
+    end
+
     cache.dirtyFlags[flag] = true
-    Core.SaveQueue[xPlayer.source] = xPlayer
+    Core.WriteQueue.players[xPlayer.source] = xPlayer
 end
 
 function Core.ClearPlayerDirtyFlags(xPlayer)
@@ -214,7 +222,7 @@ function Core.ClearPlayerDirtyFlags(xPlayer)
         cache.dirtyFlags[key] = false
     end
 
-    Core.SaveQueue[xPlayer.source] = nil
+    Core.WriteQueue.players[xPlayer.source] = nil
 end
 
 function Core.QueueInventorySync(xPlayer, itemName, count, delta, displayLabel)
@@ -255,6 +263,7 @@ function Core.FlushPendingInventorySync()
 
             if updateIndex > 1 then
                 TriggerClientEvent("esx:updateInventory", source, updates)
+                cache.lastSync = now
                 Core.DebugCounter("inventory_sync_batches")
             end
         end

@@ -202,12 +202,23 @@ local function updateHealthAndArmorInMetadata(xPlayer)
         return
     end
 
-    xPlayer.metadata.health = GetEntityHealth(ped)
-    xPlayer.metadata.armor = GetPedArmour(ped)
-    xPlayer.metadata.lastPlaytime = xPlayer.getPlayTime()
+    xPlayer.state.metadata.health = GetEntityHealth(ped)
+    xPlayer.state.metadata.armor = GetPedArmour(ped)
+    xPlayer.state.metadata.lastPlaytime = xPlayer.getPlayTime()
+    xPlayer.metadata = xPlayer.state.metadata
 end
 
 local savePlayerQuery = "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?"
+
+local function serializeAccountState(xPlayer)
+    local accounts = {}
+
+    for accountName, account in pairs(xPlayer.state.money) do
+        accounts[accountName] = account.money
+    end
+
+    return accounts
+end
 
 local function buildPlayerSaveQuery(xPlayer)
     updateHealthAndArmorInMetadata(xPlayer)
@@ -215,14 +226,14 @@ local function buildPlayerSaveQuery(xPlayer)
     return {
         query = savePlayerQuery,
         values = {
-            json.encode(xPlayer.getAccounts(true)),
-            xPlayer.job.name,
-            xPlayer.job.grade,
+            json.encode(serializeAccountState(xPlayer)),
+            xPlayer.state.job.name,
+            xPlayer.state.job.grade,
             xPlayer.group,
             json.encode(xPlayer.getCoords(false, true)),
             json.encode(xPlayer.getInventory(true)),
             json.encode(xPlayer.getLoadout(true)),
-            json.encode(xPlayer.getMeta()),
+            json.encode(xPlayer.state.metadata),
             xPlayer.identifier,
         }
     }
@@ -267,7 +278,7 @@ function Core.SavePlayer(xPlayer, cb, immediate)
     end
 
     if not immediate then
-        Core.SaveQueue[xPlayer.source] = xPlayer
+        Core.WriteQueue.players[xPlayer.source] = xPlayer
         return cb and cb()
     end
 
@@ -290,12 +301,12 @@ function Core.SavePlayers(cb)
     local parameters = {}
     local savedPlayers = {}
 
-    for source, xPlayer in pairs(Core.SaveQueue) do
+    for source, xPlayer in pairs(Core.WriteQueue.players) do
         if xPlayer and xPlayer.spawned and hasDirtyFlags(xPlayer) then
             parameters[#parameters + 1] = buildPlayerSaveQuery(xPlayer)
             savedPlayers[#savedPlayers + 1] = source
         else
-            Core.SaveQueue[source] = nil
+            Core.WriteQueue.players[source] = nil
         end
     end
 

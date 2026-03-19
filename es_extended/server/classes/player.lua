@@ -278,6 +278,12 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     self.weight = weight
     self.maxWeight = Config.MaxWeight
     self.metadata = metadata
+    self.state = {
+        money = self.accounts,
+        inventory = {},
+        job = job,
+        metadata = metadata,
+    }
     self.lastPlaytime = self.metadata.lastPlaytime or 0
     self.paycheckEnabled = true
     self.admin = Core.IsPlayerAdmin(playerId)
@@ -319,6 +325,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         local normalizedItem = normalizeInventoryEntry(itemName, inventoryCounts[itemName] or 0, inventoryMetadata[itemName])
         self.inventory[itemName] = normalizedItem
         self.inventoryList[#self.inventoryList + 1] = normalizedItem
+        self.state.inventory[itemName] = normalizedItem.count
     end
 
     table.sort(self.inventoryList, function(a, b)
@@ -663,6 +670,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     function self.getInventoryItem(itemName)
         local inventoryItem = self.inventory[itemName]
         if inventoryItem then
+            inventoryItem.count = self.state.inventory[itemName] or inventoryItem.count or 0
             return inventoryItem
         end
 
@@ -671,6 +679,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             self.inventory[itemName] = inventoryItem
             self.inventoryList[#self.inventoryList + 1] = inventoryItem
             self.inventoryArrayDirty = true
+            self.state.inventory[itemName] = 0
         end
 
         return inventoryItem
@@ -695,7 +704,10 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return false
         end
 
-        item.count = item.count + count
+        local inventoryState = self.state.inventory
+        local nextCount = (inventoryState[item.name] or 0) + count
+        inventoryState[item.name] = nextCount
+        item.count = nextCount
         self.weight = self.weight + (item.weight * count)
 
         Core.MarkPlayerDirty(self, "inventory")
@@ -716,11 +728,15 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return error(("Player ID:^5%s Tried remove a Invalid count -> %s of %s"):format(self.playerId, count, itemName))
         end
 
-        if item.count < count then
+        local inventoryState = self.state.inventory
+        local currentCount = inventoryState[item.name] or item.count
+        if currentCount < count then
             return false
         end
 
-        item.count = item.count - count
+        local nextCount = currentCount - count
+        inventoryState[item.name] = nextCount
+        item.count = nextCount
         self.weight = self.weight - (item.weight * count)
         if self.weight < 0 then
             self.weight = 0
@@ -740,7 +756,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
         count = ESX.Math.Round(count)
         if item and count >= 0 then
-            local delta = count - item.count
+            local delta = count - (self.state.inventory[item.name] or item.count)
             if delta == 0 then
                 return true
             end
@@ -844,6 +860,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
             skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
         }
+        self.state.job = self.job
 
         self.metadata.jobDuty = onDuty
         Core.MarkPlayerDirty(self, "job")
@@ -1065,7 +1082,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
     function self.getMeta(index, subIndex)
         if not index then
-            return self.metadata
+            return self.state.metadata
         end
 
         if type(index) ~= "string" then
@@ -1073,7 +1090,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return
         end
 
-        local metaData = self.metadata[index]
+        local metaData = self.state.metadata[index]
         if metaData == nil then
             return Config.EnableDebug and error(("xPlayer.getMeta ^5%s^1 not exist!"):format(index)) or nil
         end
@@ -1128,20 +1145,21 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
                 return error(("xPlayer.setMeta ^5%s^1 should be ^5number^1 or ^5string^1 or ^5table^1!"):format(value))
             end
 
-            self.metadata[index] = value
+            self.state.metadata[index] = value
         else
             if _type ~= "string" then
                 return error(("xPlayer.setMeta ^5value^1 should be ^5string^1 as a subIndex!"):format(value))
             end
 
-            if not self.metadata[index] or type(self.metadata[index]) ~= "table" then
-                self.metadata[index] = {}
+            if not self.state.metadata[index] or type(self.state.metadata[index]) ~= "table" then
+                self.state.metadata[index] = {}
             end
 
-            self.metadata[index] = type(self.metadata[index]) == "table" and self.metadata[index] or {}
-            self.metadata[index][value] = subValue
+            self.state.metadata[index] = type(self.state.metadata[index]) == "table" and self.state.metadata[index] or {}
+            self.state.metadata[index][value] = subValue
         end
-        self.triggerEvent('esx:updatePlayerData', 'metadata', self.metadata)
+        self.metadata = self.state.metadata
+        self.triggerEvent('esx:updatePlayerData', 'metadata', self.state.metadata)
         Core.MarkPlayerDirty(self, "metadata")
     end
 
@@ -1154,7 +1172,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return error("xPlayer.clearMeta ^5index^1 should be ^5string^1!")
         end
 
-        local metaData = self.metadata[index]
+        local metaData = self.state.metadata[index]
         if metaData == nil then
             if Config.EnableDebug then
                 error(("xPlayer.clearMeta ^5%s^1 does not exist!"):format(index))
@@ -1165,7 +1183,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
         if not subValues then
             -- If no subValues is provided, we will clear the entire value in the metaData table
-            self.metadata[index] = nil
+            self.state.metadata[index] = nil
         elseif type(subValues) == "string" then
             -- If subValues is a string, we will clear the specific subValue within the table
             if type(metaData) == "table" then
@@ -1190,7 +1208,8 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         else
             return error(("xPlayer.clearMeta ^5subValues^1 should be ^5string^1 or ^5table^1, received ^5%s^1!"):format(type(subValues)))
         end
-        self.triggerEvent('esx:updatePlayerData', 'metadata', self.metadata)
+        self.metadata = self.state.metadata
+        self.triggerEvent('esx:updatePlayerData', 'metadata', self.state.metadata)
         Core.MarkPlayerDirty(self, "metadata")
     end
 
