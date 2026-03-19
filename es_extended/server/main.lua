@@ -2,8 +2,8 @@ SetMapName("San Andreas")
 SetGameType("ESX Legacy")
 
 local oneSyncState = GetConvar("onesync", "off")
-local newPlayer = "INSERT INTO `users` SET `accounts` = ?, `identifier` = ?, `ssn` = ?, `group` = ?"
-local loadPlayer = "SELECT `accounts`, `ssn`, `job`, `job_grade`, `group`, `position`, `inventory`, `skin`, `loadout`, `metadata`"
+local newPlayer = "INSERT INTO `users` SET `accounts` = ?, `identifier` = ?, `group` = ?"
+local loadPlayer = "SELECT `accounts`, `job`, `job_grade`, `group`, `position`, `inventory`, `skin`, `loadout`, `metadata`"
 
 if Config.Multichar then
     newPlayer = newPlayer .. ", `firstname` = ?, `lastname` = ?, `dateofbirth` = ?, `sex` = ?, `height` = ?"
@@ -32,8 +32,8 @@ local function createESXPlayer(identifier, playerId, data)
         defaultGroup = "admin"
     end
     local parameters = Config.Multichar and
-        { json.encode(accounts), identifier, Core.generateSSN(), defaultGroup, data.firstname, data.lastname, data.dateofbirth, data.sex, data.height }
-        or { json.encode(accounts), identifier, Core.generateSSN(), defaultGroup }
+        { json.encode(accounts), identifier, defaultGroup, data.firstname, data.lastname, data.dateofbirth, data.sex, data.height }
+        or { json.encode(accounts), identifier, defaultGroup }
 
     if Config.StartingInventoryItems then
         table.insert(parameters, json.encode(Config.StartingInventoryItems))
@@ -231,9 +231,6 @@ function loadESXPlayer(identifier, playerId, isNew)
             }
         end
 
-        -- SSN
-        userData.ssn = result.ssn
-
         -- Job
         local job, grade = result.job, tostring(result.job_grade)
 
@@ -306,7 +303,7 @@ function loadESXPlayer(identifier, playerId, isNew)
         userData.metadata = (result.metadata and result.metadata ~= "") and json.decode(result.metadata) or {}
 
         -- xPlayer Creation
-        local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.ssn, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
+        local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
 
         GlobalState["playerCount"] = GlobalState["playerCount"] + 1
         ESX.Players[playerId] = xPlayer
