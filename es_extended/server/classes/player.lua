@@ -269,6 +269,8 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     self.inventory = {}
     self.inventoryList = {}
     self.inventoryArrayDirty = false
+    self.inventoryMinimal = {}
+    self.inventoryMinimalDirty = true
     self.job = job
     self.loadout = loadout
     self.name = name
@@ -333,6 +335,25 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end)
 
     Core.BindPlayerCache(self)
+
+    local function updateMinimalInventoryCache(item)
+        if self.inventoryMinimalDirty or not item then
+            return
+        end
+
+        if item.count > 0 then
+            if next(item.metadata) then
+                self.inventoryMinimal[item.name] = {
+                    count = item.count,
+                    metadata = item.metadata,
+                }
+            else
+                self.inventoryMinimal[item.name] = item.count
+            end
+        else
+            self.inventoryMinimal[item.name] = nil
+        end
+    end
 
     function self.triggerEvent(eventName, ...)
         assert(type(eventName) == "string", "eventName should be string!")
@@ -503,6 +524,10 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
     function self.getInventory(minimal)
         if minimal then
+            if not self.inventoryMinimalDirty then
+                return self.inventoryMinimal
+            end
+
             local minimalInventory = {}
 
             for itemName, v in pairs(self.inventory) do
@@ -518,7 +543,10 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
                 end
             end
 
-            return minimalInventory
+            self.inventoryMinimal = minimalInventory
+            self.inventoryMinimalDirty = false
+
+            return self.inventoryMinimal
         end
 
         return self.inventoryList
@@ -679,6 +707,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             self.inventory[itemName] = inventoryItem
             self.inventoryList[#self.inventoryList + 1] = inventoryItem
             self.inventoryArrayDirty = true
+            self.inventoryMinimalDirty = true
             self.state.inventory[itemName] = 0
         end
 
@@ -708,6 +737,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         local nextCount = (inventoryState[item.name] or 0) + count
         inventoryState[item.name] = nextCount
         item.count = nextCount
+        updateMinimalInventoryCache(item)
         self.weight = self.weight + (item.weight * count)
 
         Core.MarkPlayerDirty(self, "inventory")
@@ -737,6 +767,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         local nextCount = currentCount - count
         inventoryState[item.name] = nextCount
         item.count = nextCount
+        updateMinimalInventoryCache(item)
         self.weight = self.weight - (item.weight * count)
         if self.weight < 0 then
             self.weight = 0
