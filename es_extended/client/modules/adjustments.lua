@@ -45,26 +45,7 @@ function Adjustments:AmmoAndVehicleRewards()
 end
 
 function Adjustments:FrameLoop()
-    CreateThread(function()
-        while true do
-            if Config.DisableDisplayAmmo then
-                DisplayAmmoThisFrame(false)
-            end
-
-            if Config.DisableVehicleRewards then
-                DisablePlayerVehicleRewards(ESX.playerId)
-            end
-
-            SetPedDensityMultiplierThisFrame(Config.Multipliers.pedDensity)
-            SetScenarioPedDensityMultiplierThisFrame(Config.Multipliers.scenarioPedDensityInterior, Config.Multipliers.scenarioPedDensityExterior)
-            SetAmbientVehicleRangeMultiplierThisFrame(Config.Multipliers.ambientVehicleRange)
-            SetParkedVehicleDensityMultiplierThisFrame(Config.Multipliers.parkedVehicleDensity)
-            SetRandomVehicleDensityMultiplierThisFrame(Config.Multipliers.randomVehicleDensity)
-            SetVehicleDensityMultiplierThisFrame(Config.Multipliers.vehicleDensity)
-
-            Wait(0)
-        end
-    end)
+    return false
 end
 
 function Adjustments:EnablePvP()
@@ -245,5 +226,4 @@ function Adjustments:Load()
     self:DiscordPresence()
     self:WantedLevel()
     self:DisableRadio()
-    self:FrameLoop()
 end
