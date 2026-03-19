@@ -5,7 +5,6 @@ local oneSyncState = GetConvar("onesync", "off")
 local newPlayer = "INSERT INTO `users` SET `accounts` = ?, `identifier` = ?, `group` = ?"
 local loadPlayer = "SELECT `accounts`, `job`, `job_grade`, `group`, `position`, `inventory`, `skin`, `loadout`, `metadata`"
 local missingSteamMessage = "Steam must be running to join this server"
-local cachedWeaponMaxAmmo = {}
 
 if Config.StartingInventoryItems then
     newPlayer = newPlayer .. ", `inventory` = ?"
@@ -16,22 +15,6 @@ if Config.Identity then
 end
 
 loadPlayer = loadPlayer .. " FROM `users` WHERE identifier = ?"
-
-local function getWeaponMaxAmmo(source, weaponName)
-    local cachedMaxAmmo = cachedWeaponMaxAmmo[weaponName]
-    if cachedMaxAmmo then
-        return cachedMaxAmmo
-    end
-
-    local playerPed = GetPlayerPed(source)
-    if not playerPed or playerPed <= 0 then
-        return 250
-    end
-
-    local _, maxAmmo = GetMaxAmmo(playerPed, joaat(weaponName))
-    cachedWeaponMaxAmmo[weaponName] = maxAmmo or 250
-    return cachedWeaponMaxAmmo[weaponName]
-end
 
 if not Config.CustomInventory then
     AddStateBagChangeHandler(nil, nil, function(bagName, key, value, _, replicated)
@@ -50,14 +33,20 @@ if not Config.CustomInventory then
         end
 
         local weaponName = key:sub(6)
+        local weaponConfig = GetWeaponConfig(weaponName)
         local weapon = xPlayer.loadout[weaponName]
+        if not weaponConfig then
+            Player(source).state:set(key, weapon and weapon.ammo or 0, true)
+            return
+        end
+
         if not weapon or type(value) ~= "number" then
             Player(source).state:set(key, weapon and weapon.ammo or 0, true)
             return
         end
 
         local ammoCount = math.max(0, math.floor(value))
-        local maxAmmo = getWeaponMaxAmmo(source, weaponName)
+        local maxAmmo = weaponConfig.maxAmmo or GetWeaponMaxAmmo(weaponName)
         local ammoSync = xPlayer.cache and xPlayer.cache.ammoSync
         local now = GetGameTimer()
 

@@ -44,7 +44,7 @@ Config.MK2WeaponTints = {
     [32] = TranslateCap('tint_metallic_red_yellow')
 }
 
-Config.Weapons = {
+local baseWeaponEntries = {
     -- Melee
     { name = "WEAPON_DAGGER", label = TranslateCap("weapon_dagger"), components = {} },
     { name = "WEAPON_BAT", label = TranslateCap("weapon_bat"), components = {} },
@@ -1106,3 +1106,108 @@ Config.Weapons = {
         },
     },
 }
+
+
+local ammoTypeDefaults = {
+    AMMO_PISTOL = { type = "pistol", maxAmmo = 250 },
+    AMMO_SMG = { type = "smg", maxAmmo = 500 },
+    AMMO_RIFLE = { type = "rifle", maxAmmo = 500 },
+    AMMO_MG = { type = "mg", maxAmmo = 750 },
+    AMMO_SHOTGUN = { type = "shotgun", maxAmmo = 120 },
+    AMMO_SNIPER = { type = "sniper", maxAmmo = 50 },
+    AMMO_SNIPER_REMOTE = { type = "sniper", maxAmmo = 50 },
+    AMMO_GRENADELAUNCHER = { type = "launcher", maxAmmo = 20 },
+    AMMO_RPG = { type = "launcher", maxAmmo = 20 },
+    AMMO_HOMINGLAUNCHER = { type = "launcher", maxAmmo = 20 },
+    AMMO_MINIGUN = { type = "heavy", maxAmmo = 9999 },
+    AMMO_FIREWORK = { type = "launcher", maxAmmo = 20 },
+    AMMO_RAILGUN = { type = "heavy", maxAmmo = 40 },
+    AMMO_RAILGUNXM3 = { type = "heavy", maxAmmo = 40 },
+    AMMO_FLAREGUN = { type = "utility", maxAmmo = 20 },
+    AMMO_FLARE = { type = "throwable", maxAmmo = 25 },
+    AMMO_BALL = { type = "throwable", maxAmmo = 25 },
+    AMMO_BZGAS = { type = "throwable", maxAmmo = 25 },
+    AMMO_GRENADE = { type = "throwable", maxAmmo = 25 },
+    AMMO_MOLOTOV = { type = "throwable", maxAmmo = 25 },
+    AMMO_STICKYBOMB = { type = "throwable", maxAmmo = 25 },
+    AMMO_PROXMINE = { type = "throwable", maxAmmo = 25 },
+    AMMO_PIPEBOMB = { type = "throwable", maxAmmo = 25 },
+    AMMO_SMOKEGRENADE = { type = "throwable", maxAmmo = 25 },
+    AMMO_SNOWBALL = { type = "throwable", maxAmmo = 25 },
+    AMMO_PETROLCAN = { type = "utility", maxAmmo = 4500 },
+    AMMO_FIREEXTINGUISHER = { type = "utility", maxAmmo = 4500 },
+}
+
+local function getAmmoTypeDefaults(weaponData)
+    local ammoData = weaponData and weaponData.ammo
+    if not ammoData or not ammoData.hash then
+        return nil
+    end
+
+    return ammoTypeDefaults[tostring(ammoData.hash)]
+end
+
+local function normalizeWeaponConfig(name, data)
+    local ammoDefaults = getAmmoTypeDefaults(data)
+    local weaponData = {
+        label = data.label or name,
+        type = data.type or (data.throwable and "throwable") or (ammoDefaults and ammoDefaults.type) or "unknown",
+        maxAmmo = data.maxAmmo or (ammoDefaults and ammoDefaults.maxAmmo) or ((data.throwable and 25) or 250),
+        throwable = data.throwable or false,
+        ammo = data.ammo,
+        tints = data.tints,
+        components = data.components or {},
+    }
+
+    weaponData.name = name
+    return weaponData
+end
+
+Config.BaseWeapons = {}
+
+for i = 1, #baseWeaponEntries do
+    local weapon = baseWeaponEntries[i]
+    Config.BaseWeapons[weapon.name] = normalizeWeaponConfig(weapon.name, weapon)
+end
+
+Config.AddonWeapons = Config.AddonWeapons or {}
+Config.Weapons = {}
+
+local function mergeWeapons(target, source)
+    for weaponName, weaponData in pairs(source) do
+        target[weaponName] = normalizeWeaponConfig(weaponName, weaponData)
+    end
+end
+
+mergeWeapons(Config.Weapons, Config.BaseWeapons)
+mergeWeapons(Config.Weapons, Config.AddonWeapons)
+
+function RegisterAddonWeapon(name, data)
+    if not name or not data then
+        return
+    end
+
+    name = string.upper(name)
+    Config.AddonWeapons[name] = normalizeWeaponConfig(name, data)
+    Config.Weapons[name] = Config.AddonWeapons[name]
+    if ESX and ESX.RefreshWeaponCache then
+        ESX.RefreshWeaponCache(name)
+    end
+
+    return Config.Weapons[name]
+end
+
+function GetWeaponConfig(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+
+    return Config.Weapons[string.upper(name)]
+end
+
+function GetWeaponMaxAmmo(name)
+    local weapon = GetWeaponConfig(name)
+    return weapon and weapon.maxAmmo or 250
+end
+
+exports("RegisterWeapon", RegisterAddonWeapon)

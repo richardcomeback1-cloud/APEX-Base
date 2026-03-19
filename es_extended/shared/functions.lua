@@ -10,13 +10,32 @@ for i = 97, 122 do
     table.insert(Charset, string.char(i))
 end
 
-local weaponsByName = {}
 local weaponsByHash = {}
 
+function ESX.RefreshWeaponCache(weaponName)
+    if weaponName then
+        local weapon = Config.Weapons[weaponName]
+        if weapon then
+            weaponsByHash[joaat(weaponName)] = weapon
+        end
+
+        return
+    end
+
+    weaponsByHash = {}
+
+    for configuredWeaponName, weapon in pairs(Config.Weapons) do
+        weaponsByHash[joaat(configuredWeaponName)] = weapon
+    end
+end
+
 CreateThread(function()
-    for index, weapon in pairs(Config.Weapons) do
-        weaponsByName[weapon.name] = index
-        weaponsByHash[joaat(weapon.name)] = weapon
+    ESX.RefreshWeaponCache()
+end)
+
+AddEventHandler("onResourceStart", function(resourceName)
+    if resourceName == GetCurrentResourceName() then
+        ESX.RefreshWeaponCache()
     end
 end)
 
@@ -43,10 +62,10 @@ end
 function ESX.GetWeapon(weaponName)
     weaponName = string.upper(weaponName)
 
-    assert(weaponsByName[weaponName], "Invalid weapon name!")
+    local weapon = Config.Weapons[weaponName]
+    assert(weapon, "Invalid weapon name!")
 
-    local index = weaponsByName[weaponName]
-    return index, Config.Weapons[index]
+    return weaponName, weapon
 end
 
 ---@param weaponHash number
@@ -68,10 +87,10 @@ end
 function ESX.GetWeaponLabel(weaponName)
     weaponName = string.upper(weaponName)
 
-    assert(weaponsByName[weaponName], "Invalid weapon name!")
+    local weapon = Config.Weapons[weaponName]
+    assert(weapon, "Invalid weapon name!")
 
-    local index = weaponsByName[weaponName]
-    return Config.Weapons[index].label or ""
+    return weapon.label or ""
 end
 
 ---@param weaponName string
@@ -80,8 +99,8 @@ end
 function ESX.GetWeaponComponent(weaponName, weaponComponent)
     weaponName = string.upper(weaponName)
 
-    assert(weaponsByName[weaponName], "Invalid weapon name!")
-    local weapon = Config.Weapons[weaponsByName[weaponName]]
+    local weapon = Config.Weapons[weaponName]
+    assert(weapon, "Invalid weapon name!")
 
     for _, component in ipairs(weapon.components) do
         ---@cast component ESXWeaponComponent
