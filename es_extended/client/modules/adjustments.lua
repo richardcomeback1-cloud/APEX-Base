@@ -177,22 +177,22 @@ end
 
 function Adjustments:DiscordPresence()
     if Config.DiscordActivity.appId ~= 0 then
-        CreateThread(function()
-            while true do
-                SetDiscordAppId(Config.DiscordActivity.appId)
-                SetRichPresence(self:ReplacePlaceholders(Config.DiscordActivity.presence))
-                SetDiscordRichPresenceAsset(Config.DiscordActivity.assetName)
-                SetDiscordRichPresenceAssetText(self:ReplacePlaceholders(Config.DiscordActivity.assetText))
+        local function refreshDiscordPresence()
+            SetDiscordAppId(Config.DiscordActivity.appId)
+            SetRichPresence(self:ReplacePlaceholders(Config.DiscordActivity.presence))
+            SetDiscordRichPresenceAsset(Config.DiscordActivity.assetName)
+            SetDiscordRichPresenceAssetText(self:ReplacePlaceholders(Config.DiscordActivity.assetText))
 
-                for i = 1, #Config.DiscordActivity.buttons do
-                    local button = Config.DiscordActivity.buttons[i]
-                    local buttonUrl = self:ReplacePlaceholders(button.url)
-                    SetDiscordRichPresenceAction(i - 1, button.label, buttonUrl)
-                end
-
-                Wait(Config.DiscordActivity.refresh)
+            for i = 1, #Config.DiscordActivity.buttons do
+                local button = Config.DiscordActivity.buttons[i]
+                local buttonUrl = self:ReplacePlaceholders(button.url)
+                SetDiscordRichPresenceAction(i - 1, button.label, buttonUrl)
             end
-        end)
+
+            SetTimeout(Config.DiscordActivity.refresh, refreshDiscordPresence)
+        end
+
+        refreshDiscordPresence()
     end
 end
 

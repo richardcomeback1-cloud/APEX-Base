@@ -146,7 +146,7 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     local timer = GetGameTimer()
     while not HaveAllStreamingRequestsCompleted(ESX.PlayerData.ped) and (GetGameTimer() - timer) < 2000 do
-        Wait(0)
+        Wait(5)
     end
 
     Adjustments:Load()
@@ -562,71 +562,67 @@ if not Config.CustomInventory then
 end
 
 if not Config.CustomInventory then
-    CreateThread(function()
-        while true do
-            local hasVisiblePickups = refreshPickupRenderState()
-            Wait(hasVisiblePickups and Config.PickupScanInterval or Config.PickupIdleInterval)
+    local function schedulePickupScan()
+        local hasVisiblePickups = refreshPickupRenderState()
+        SetTimeout(hasVisiblePickups and Config.PickupScanInterval or Config.PickupIdleInterval, schedulePickupScan)
+    end
+
+    local function renderVisiblePickups()
+        if not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+            clearPickupRenderState()
+            return SetTimeout(Config.PickupIdleInterval, renderVisiblePickups)
         end
-    end)
 
-    CreateThread(function()
-        while true do
-            if not ESX.PlayerLoaded or not ESX.PlayerData.ped then
-                clearPickupRenderState()
-                Wait(Config.PickupIdleInterval)
-                goto continue
+        local visiblePickups = pickupRenderState.visible
+        if #visiblePickups == 0 then
+            return SetTimeout(Config.PickupIdleInterval, renderVisiblePickups)
+        end
+
+        local promptPickupId = pickupRenderState.promptPickupId
+        local ped = ESX.PlayerData.ped
+
+        for i = 1, #visiblePickups do
+            local pickupState = visiblePickups[i]
+            local pickup = pickups[pickupState.id]
+
+            if pickup then
+                local label = pickup.label
+
+                if pickupState.id == promptPickupId then
+                    label = ("%s~n~%s"):format(label, TranslateCap("threw_pickup_prompt"))
+                elseif pickup.inRange then
+                    pickup.inRange = false
+                end
+
+                local textCoords = pickup.coords + vector3(0.0, 0.0, 0.25)
+                ESX.Game.Utils.DrawText3D(textCoords, label, 1.2, 1)
             end
+        end
 
-            local visiblePickups = pickupRenderState.visible
-            if #visiblePickups == 0 then
-                Wait(Config.PickupIdleInterval)
-                goto continue
-            end
+        if promptPickupId and IsControlJustReleased(0, 38) then
+            local pickup = pickups[promptPickupId]
+            if pickup and IsPedOnFoot(ped) and not pickup.inRange then
+                local _, closestDistance = ESX.Game.GetClosestPlayer(GetEntityCoords(ped))
+                if closestDistance == -1 or closestDistance > 3 then
+                    pickup.inRange = true
 
-            local promptPickupId = pickupRenderState.promptPickupId
-            local ped = ESX.PlayerData.ped
+                    local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
+                    ESX.Streaming.RequestAnimDict(dict)
+                    TaskPlayAnim(ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
+                    RemoveAnimDict(dict)
+                    Wait(1000)
 
-            for i = 1, #visiblePickups do
-                local pickupState = visiblePickups[i]
-                local pickup = pickups[pickupState.id]
-
-                if pickup then
-                    local label = pickup.label
-
-                    if pickupState.id == promptPickupId then
-                        label = ("%s~n~%s"):format(label, TranslateCap("threw_pickup_prompt"))
-                    elseif pickup.inRange then
-                        pickup.inRange = false
-                    end
-
-                    local textCoords = pickup.coords + vector3(0.0, 0.0, 0.25)
-                    ESX.Game.Utils.DrawText3D(textCoords, label, 1.2, 1)
+                    TriggerServerEvent("esx:onPickup", promptPickupId)
+                    PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
                 end
             end
-
-            if promptPickupId and IsControlJustReleased(0, 38) then
-                local pickup = pickups[promptPickupId]
-                if pickup and IsPedOnFoot(ped) and not pickup.inRange then
-                    local _, closestDistance = ESX.Game.GetClosestPlayer(GetEntityCoords(ped))
-                    if closestDistance == -1 or closestDistance > 3 then
-                        pickup.inRange = true
-
-                        local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
-                        ESX.Streaming.RequestAnimDict(dict)
-                        TaskPlayAnim(ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
-                        RemoveAnimDict(dict)
-                        Wait(1000)
-
-                        TriggerServerEvent("esx:onPickup", promptPickupId)
-                        PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
-                    end
-                end
-            end
-
-            Wait(0)
-            ::continue::
         end
-    end)
+
+        SetTimeout(50, renderVisiblePickups)
+    end
+
+    schedulePickupScan()
+    renderVisiblePickups()
 end
 
 ----- Admin commands from esx_adminplus
@@ -652,7 +648,7 @@ RegisterNetEvent("esx:tpm", function()
         -- Fade screen to hide how clients get teleported.
         DoScreenFadeOut(650)
         while not IsScreenFadedOut() do
-            Wait(0)
+            Wait(5)
         end
 
         local ped, coords = ESX.PlayerData.ped, GetBlipInfoIdCoord(blipMarker)
@@ -677,7 +673,7 @@ RegisterNetEvent("esx:tpm", function()
                 if GetGameTimer() - curTime > 1000 then
                     break
                 end
-                Wait(0)
+                Wait(5)
             end
             NewLoadSceneStop()
             SetPedCoordsKeepVehicle(ped, x, y, z)
@@ -687,17 +683,17 @@ RegisterNetEvent("esx:tpm", function()
                 if GetGameTimer() - curTime > 1000 then
                     break
                 end
-                Wait(0)
+                Wait(5)
             end
 
             -- Get ground coord. As mentioned in the natives, this only works if the client is in render distance.
             found, groundZ = GetGroundZFor_3dCoord(x, y, z, false)
             if found then
-                Wait(0)
+                Wait(5)
                 SetPedCoordsKeepVehicle(ped, x, y, groundZ)
                 break
             end
-            Wait(0)
+            Wait(5)
         end
 
         -- Remove black screen once the loop has ended.
@@ -758,7 +754,7 @@ local function noclipThread()
         if IsControlPressed(1, 173) then
             noclip_pos = GetOffsetFromEntityInWorldCoords(ESX.PlayerData.ped, 0.0, 0.0, -1.0)
         end
-        Wait(0)
+        Wait(5)
     end
 end
 
