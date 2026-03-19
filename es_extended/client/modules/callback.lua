@@ -33,13 +33,16 @@ function Callbacks:Execute(cb, id, ...)
 end
 
 function Callbacks:Trigger(event, cb, invoker, ...)
-    self.requests[self.id] = {
+    local requestId = self.id
+    self.requests[requestId] = {
         await = type(cb) == "boolean",
-        cb = cb or promise:new()
+        cb = cb or promise:new(),
+        event = event,
+        startedAt = GetGameTimer(),
     }
-    local table = self.requests[self.id]
+    local table = self.requests[requestId]
 
-    TriggerServerEvent("esx:triggerServerCallback", event, self.id, invoker, ...)
+    TriggerServerEvent("esx:triggerServerCallback", event, requestId, invoker, ...)
 
     self.id += 1
 
@@ -52,7 +55,6 @@ function Callbacks:ServerRecieve(requestId, invoker, ...)
     end
 
     local callback = self.requests[requestId]
-
     self.requests[requestId] = nil
 
     if callback.await then
@@ -142,5 +144,17 @@ AddEventHandler("onResourceStop", function(resource)
         if v.resource == resource then
             Callbacks.storage[k] = nil
         end
+    end
+
+    if resource ~= GetCurrentResourceName() then
+        return
+    end
+
+    for requestId, request in pairs(Callbacks.requests) do
+        if request.await and request.cb and request.cb.state == "pending" then
+            request.cb:reject(("Resource stopped: %s"):format(resource))
+        end
+
+        Callbacks.requests[requestId] = nil
     end
 end)

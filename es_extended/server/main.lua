@@ -100,7 +100,7 @@ local function onPlayerDropped(playerId, reason, cb)
         ESX.Players[playerId] = nil
         Core.playersByIdentifier[xPlayer.identifier] = nil
         Core.PlayerCache[playerId] = nil
-        Core.ActiveInventorySync[playerId] = nil
+        Core.ActivePlayerSync[playerId] = nil
         Core.PlayerCoords[playerId] = nil
         Core.EventThrottle[playerId] = nil
 
@@ -169,178 +169,183 @@ AddEventHandler("playerConnecting", function(_, _, deferrals)
     deferrals.done()
 end)
 
+local function decodePlayerField(value, fallback)
+    if not value or value == "" then
+        return fallback
+    end
+
+    local decoded = json.decode(value)
+    if decoded == nil then
+        return fallback
+    end
+
+    return decoded
+end
+
+local function buildPlayerLoadPayload(identifier, playerId, result)
+    local payload = {
+        accounts = {},
+        inventory = decodePlayerField(result.inventory, {}),
+        loadout = {},
+        weight = 0,
+        name = GetPlayerName(playerId),
+        identifier = identifier,
+        firstName = "John",
+        lastName = "Doe",
+        dateofbirth = "01/01/2000",
+        height = 120,
+        dead = false,
+        variables = {},
+        metadata = decodePlayerField(result.metadata, {}),
+    }
+
+    local accounts = decodePlayerField(result.accounts, {})
+    local normalizedAccounts = {}
+    if #accounts > 0 then
+        for i = 1, #accounts do
+            local account = accounts[i]
+            if account and account.name then
+                normalizedAccounts[string.lower(account.name)] = account.money or 0
+            end
+        end
+    else
+        for accountName, money in pairs(accounts) do
+            if type(accountName) == "string" then
+                if type(money) == "table" then
+                    normalizedAccounts[string.lower(accountName)] = money.money or money.amount or 0
+                else
+                    normalizedAccounts[string.lower(accountName)] = money or 0
+                end
+            end
+        end
+    end
+
+    for accountName in pairs(Config.Accounts) do
+        payload.accounts[accountName] = normalizedAccounts[accountName] or Config.StartingAccountMoney[accountName] or 0
+    end
+
+    for accountName, money in pairs(normalizedAccounts) do
+        if payload.accounts[accountName] == nil then
+            payload.accounts[accountName] = money or 0
+        end
+    end
+
+    local job, grade = result.job, tostring(result.job_grade)
+    if not ESX.DoesJobExist(job, grade) then
+        print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
+        job, grade = "unemployed", "0"
+    end
+
+    local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
+    payload.job = {
+        id = jobObject.id,
+        name = jobObject.name,
+        label = jobObject.label,
+        grade = tonumber(grade),
+        grade_name = gradeObject.name,
+        grade_label = gradeObject.label,
+        grade_salary = gradeObject.salary,
+        skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
+        skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
+    }
+
+    if not Config.CustomInventory then
+        local loadout = decodePlayerField(result.loadout, {})
+        for name, weapon in pairs(loadout) do
+            local label = ESX.GetWeaponLabel(name)
+            if label then
+                payload.loadout[#payload.loadout + 1] = {
+                    name = name,
+                    ammo = weapon.ammo,
+                    label = label,
+                    components = weapon.components or {},
+                    tintIndex = weapon.tintIndex or 0,
+                }
+            end
+        end
+    end
+
+    payload.group = result.group == "superadmin" and "admin" or (result.group or "user")
+    if result.group == "superadmin" then
+        print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
+    end
+
+    payload.coords = decodePlayerField(result.position, Config.DefaultSpawns[ESX.Math.Random(1, #Config.DefaultSpawns)])
+    payload.skin = decodePlayerField(result.skin, { sex = result.sex == "f" and 1 or 0 })
+
+    if result.firstname and result.firstname ~= "" then
+        payload.firstName = result.firstname
+        payload.lastName = result.lastname
+        payload.name = ("%s %s"):format(result.firstname, result.lastname)
+        payload.variables.firstName = result.firstname
+        payload.variables.lastName = result.lastname
+
+        if result.dateofbirth then
+            payload.dateofbirth = result.dateofbirth
+            payload.variables.dateofbirth = result.dateofbirth
+        end
+
+        if result.sex then
+            payload.sex = result.sex
+            payload.variables.sex = result.sex
+        end
+
+        if result.height then
+            payload.height = result.height
+            payload.variables.height = result.height
+        end
+    end
+
+    return payload
+end
+
+local function syncLoadedPlayer(xPlayer, payload, playerId, isNew)
+    payload.inventory = xPlayer.inventoryList
+    payload.money = xPlayer.getMoney()
+    payload.maxWeight = xPlayer.getMaxWeight()
+    payload.variables = xPlayer.variables or payload.variables or {}
+
+    TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
+    xPlayer.triggerEvent("esx:playerLoaded", payload, isNew, payload.skin)
+
+    if not Config.CustomInventory then
+        xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
+    end
+
+    xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
+    print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+end
+
 function loadESXPlayer(identifier, playerId, isNew)
     MySQL.prepare(loadPlayer, { identifier }, function(result)
         if not result or GetPlayerPing(playerId) <= 0 then
             return
         end
 
-        local userData = {
-            accounts = {},
-            inventory = {},
-            loadout = {},
-            weight = 0,
-            name = GetPlayerName(playerId),
-            identifier = identifier,
-            firstName = "John",
-            lastName = "Doe",
-            dateofbirth = "01/01/2000",
-            height = 120,
-            dead = false,
-        }
-
-        -- Accounts
-        local accounts = result.accounts
-        accounts = (accounts and accounts ~= "") and json.decode(accounts) or {}
-
-        local normalizedAccounts = {}
-        if #accounts > 0 then
-            for i = 1, #accounts do
-                local account = accounts[i]
-                if account and account.name then
-                    normalizedAccounts[string.lower(account.name)] = account.money or 0
-                end
-            end
-        else
-            for accountName, money in pairs(accounts) do
-                if type(accountName) == "string" then
-                    if type(money) == "table" then
-                        normalizedAccounts[string.lower(accountName)] = money.money or money.amount or 0
-                    else
-                        normalizedAccounts[string.lower(accountName)] = money or 0
-                    end
-                end
-            end
-        end
-        accounts = normalizedAccounts
-
-        for account in pairs(Config.Accounts) do
-            userData.accounts[account] = accounts[account] or Config.StartingAccountMoney[account] or 0
-        end
-
-        for accountName, money in pairs(accounts) do
-            if userData.accounts[accountName] == nil then
-                userData.accounts[accountName] = money or 0
-            end
-        end
-
-        -- Job
-        local job, grade = result.job, tostring(result.job_grade)
-
-        if not ESX.DoesJobExist(job, grade) then
-            print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
-            job, grade = "unemployed", "0"
-        end
-
-        local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
-
-        userData.job = {
-            id = jobObject.id,
-            name = jobObject.name,
-            label = jobObject.label,
-
-            grade = tonumber(grade),
-            grade_name = gradeObject.name,
-            grade_label = gradeObject.label,
-            grade_salary = gradeObject.salary,
-
-            skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
-            skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
-        }
-
-        -- Inventory
-        if result.inventory and result.inventory ~= "" then
-            userData.inventory = json.decode(result.inventory)
-        end
-
-        -- Group
-        if result.group then
-            if result.group == "superadmin" then
-                userData.group = "admin"
-                print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
-            else
-                userData.group = result.group
-            end
-        else
-            userData.group = "user"
-        end
-
-        -- Loadout
-        if not Config.CustomInventory then
-            if result.loadout and result.loadout ~= "" then
-
-                local loadout = json.decode(result.loadout)
-                for name, weapon in pairs(loadout) do
-                    local label = ESX.GetWeaponLabel(name)
-
-                    if label then
-                        userData.loadout[#userData.loadout + 1] = {
-                            name = name,
-                            ammo = weapon.ammo,
-                            label = label,
-                            components = weapon.components or {},
-                            tintIndex = weapon.tintIndex or 0,
-                        }
-                    end
-                end
-            end
-        end
-
-        -- Position
-        userData.coords = json.decode(result.position) or Config.DefaultSpawns[ESX.Math.Random(1,#Config.DefaultSpawns)]
-
-        -- Skin
-        userData.skin = (result.skin and result.skin ~= "") and json.decode(result.skin) or { sex = userData.sex == "f" and 1 or 0 }
-
-        -- Metadata
-        userData.metadata = (result.metadata and result.metadata ~= "") and json.decode(result.metadata) or {}
-
-        -- xPlayer Creation
-        local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
+        local payload = buildPlayerLoadPayload(identifier, playerId, result)
+        local xPlayer = CreateExtendedPlayer(
+            playerId,
+            identifier,
+            payload.group,
+            payload.accounts,
+            payload.inventory,
+            payload.weight,
+            payload.job,
+            payload.loadout,
+            payload.name,
+            payload.coords,
+            payload.metadata
+        )
 
         GlobalState["playerCount"] = GlobalState["playerCount"] + 1
         ESX.Players[playerId] = xPlayer
         Core.playersByIdentifier[identifier] = xPlayer
 
-        -- Identity
-        if result.firstname and result.firstname ~= "" then
-            userData.firstName = result.firstname
-            userData.lastName = result.lastname
+        xPlayer.name = payload.name
+        xPlayer.variables = payload.variables or {}
+        Player(playerId).state:set("name", xPlayer.name, true)
 
-            local name = ("%s %s"):format(result.firstname, result.lastname)
-            userData.name = name
-
-            xPlayer.set("firstName", result.firstname)
-            xPlayer.set("lastName", result.lastname)
-            xPlayer.setName(name)
-
-            if result.dateofbirth then
-                userData.dateofbirth = result.dateofbirth
-                xPlayer.set("dateofbirth", result.dateofbirth)
-            end
-            if result.sex then
-                userData.sex = result.sex
-                xPlayer.set("sex", result.sex)
-            end
-            if result.height then
-                userData.height = result.height
-                xPlayer.set("height", result.height)
-            end
-        end
-
-        userData.inventory = xPlayer.getInventory()
-        TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
-        userData.money = xPlayer.getMoney()
-        userData.maxWeight = xPlayer.getMaxWeight()
-        userData.variables = xPlayer.variables or {}
-        xPlayer.triggerEvent("esx:playerLoaded", userData, isNew, userData.skin)
-
-        if not Config.CustomInventory then
-            xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
-        end
-
-        xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
-        print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+        syncLoadedPlayer(xPlayer, payload, playerId, isNew)
     end)
 end
 
@@ -680,7 +685,7 @@ local function buildCallbackPlayerData(xPlayer, fullPayload)
 
     if fullPayload then
         payload.accounts = xPlayer.getAccounts()
-        payload.inventory = xPlayer.getInventory()
+        payload.inventory = xPlayer.inventoryList
         payload.loadout = xPlayer.getLoadout()
         payload.position = xPlayer.getCoords(true)
     else
@@ -692,8 +697,12 @@ local function buildCallbackPlayerData(xPlayer, fullPayload)
     return payload
 end
 
+local function getCallbackTargetPlayer(source, target)
+    return ESX.Players[target or source]
+end
+
 ESX.RegisterServerCallback("esx:getPlayerData", function(source, cb, fullPayload)
-    local xPlayer = ESX.GetPlayerFromId(source)
+    local xPlayer = getCallbackTargetPlayer(source)
 
     if not xPlayer then
         return
@@ -711,7 +720,7 @@ ESX.RegisterServerCallback("esx:getGameBuild", function(_, cb)
 end)
 
 ESX.RegisterServerCallback("esx:getOtherPlayerData", function(_, cb, target, fullPayload)
-    local xPlayer = ESX.GetPlayerFromId(target)
+    local xPlayer = getCallbackTargetPlayer(nil, target)
 
     if not xPlayer then
         return
@@ -724,10 +733,10 @@ ESX.RegisterServerCallback("esx:getPlayerNames", function(source, cb, players)
     players[source] = nil
 
     for playerId, _ in pairs(players) do
-        local xPlayer = ESX.GetPlayerFromId(playerId)
+        local xPlayer = ESX.Players[playerId]
 
         if xPlayer then
-            players[playerId] = xPlayer.getName()
+            players[playerId] = xPlayer.name
         else
             players[playerId] = nil
         end

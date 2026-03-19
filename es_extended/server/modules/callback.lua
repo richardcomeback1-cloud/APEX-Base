@@ -9,6 +9,7 @@ Callbacks = {}
 Callbacks.requests = {}
 Callbacks.storage = {}
 Callbacks.id = 0
+Callbacks.requestsByPlayer = {}
 
 -- =============================================
 -- MARK: Internal Functions
@@ -35,16 +36,21 @@ function Callbacks:Execute(cb, ...)
 end
 
 function Callbacks:Trigger(player, event, cb, invoker, ...)
+    local requestId = self.id
     self.requests[self.id] = {
+        id = requestId,
+        player = player,
         await = type(cb) == "boolean",
         cb = cb or promise:new(),
         startedAt = GetGameTimer(),
         event = event,
     }
+    self.requestsByPlayer[player] = self.requestsByPlayer[player] or {}
+    self.requestsByPlayer[player][requestId] = true
     local table = self.requests[self.id]
     Core.DebugCounter("server_callback_request_count")
 
-    TriggerClientEvent("esx:triggerClientCallback", player, event, self.id, invoker, ...)
+    TriggerClientEvent("esx:triggerClientCallback", player, event, requestId, invoker, ...)
 
     self.id += 1
 
@@ -77,6 +83,13 @@ function Callbacks:RecieveClient(requestId, invoker, ...)
     Core.DebugDuration(("server_callback:%s"):format(callback.event or "unknown"), callback.startedAt or GetGameTimer())
 
     self.requests[requestId] = nil
+    local playerRequests = self.requestsByPlayer[callback.player]
+    if playerRequests then
+        playerRequests[requestId] = nil
+        if not next(playerRequests) then
+            self.requestsByPlayer[callback.player] = nil
+        end
+    end
     if callback.await then
         callback.cb:resolve({ ... })
     else
@@ -156,4 +169,23 @@ AddEventHandler("onResourceStop", function(resource)
             Callbacks.storage[k] = nil
         end
     end
+end)
+
+AddEventHandler("playerDropped", function()
+    local playerId = source
+    local requestIds = Callbacks.requestsByPlayer[playerId]
+    if not requestIds then
+        return
+    end
+
+    for requestId in pairs(requestIds) do
+        local request = Callbacks.requests[requestId]
+        if request and request.await and request.cb and request.cb.state == "pending" then
+            request.cb:reject("Client Callback Cancelled")
+        end
+
+        Callbacks.requests[requestId] = nil
+    end
+
+    Callbacks.requestsByPlayer[playerId] = nil
 end)

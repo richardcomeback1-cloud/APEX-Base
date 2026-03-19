@@ -281,6 +281,25 @@ ESX.SecureNetEvent("esx:setAccountMoney", function(account)
     ESX.SetPlayerData("accounts", ESX.PlayerData.accounts)
 end)
 
+ESX.SecureNetEvent("esx:updateAccounts", function(updates)
+    local accounts = ESX.PlayerData.accounts
+    if not accounts then
+        return
+    end
+
+    for i = 1, #updates do
+        local update = updates[i]
+        for accountIndex = 1, #accounts do
+            if accounts[accountIndex].name == update.name then
+                accounts[accountIndex] = update
+                break
+            end
+        end
+    end
+
+    ESX.SetPlayerData("accounts", accounts)
+end)
+
 if not Config.CustomInventory then
     ESX.SecureNetEvent("esx:updateInventory", function(updates)
         for i = 1, #updates do

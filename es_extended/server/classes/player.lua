@@ -56,11 +56,12 @@
 ---@field getAccountMoney fun(accountName: string): number        # Get account balance by name.
 ---@field getAccounts fun(minimal?: boolean): ESXAccount[]|table<string,number>  # Get all accounts, optionally minimal.
 --- Inventory Functions
----@field getInventory fun(minimal?: boolean): ESXInventoryItem[]|table<string,number>  # Get inventory, optionally minimal.
+---@field getInventory fun(minimal?: boolean): table<string, ESXInventoryItem>|{name:string, count:number}[]  # Get inventory, optionally minimal.
 ---@field getInventoryItem fun(itemName: string): ESXInventoryItem? # Get a specific item from inventory.
 ---@field addInventoryItem fun(itemName: string, count: number)     # Add items to inventory.
 ---@field removeInventoryItem fun(itemName: string, count: number)  # Remove items from inventory.
 ---@field setInventoryItem fun(itemName: string, count: number)     # Set item count in inventory.
+---@field clearInventory fun()                                         # Clear all inventory item counts.
 ---@field getWeight fun(): number                                   # Get current carried weight.
 ---@field getMaxWeight fun(): number                                # Get maximum carry weight.
 ---@field setMaxWeight fun(newWeight: number)                       # Set maximum carry weight.
@@ -120,7 +121,7 @@
 ---@field coords table              # Player's coordinates {x, y, z, heading}.
 ---@field group string              # Player permission group.
 ---@field identifier string         # Unique identifier (Steam Hex).
----@field inventory ESXInventoryItem[] # Player's inventory items.
+---@field inventory table<string, ESXInventoryItem> # Player's inventory items keyed by item name.
 ---@field job ESXJob                # Player's current job.
 ---@field loadout ESXInventoryWeapon[] # Player's current weapons.
 ---@field name string               # Player's display name.
@@ -336,23 +337,63 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
     Core.BindPlayerCache(self)
 
-    local function updateMinimalInventoryCache(item)
-        if self.inventoryMinimalDirty or not item then
-            return
+    function self.markInventoryDirty()
+        self.inventoryMinimalDirty = true
+    end
+
+    function self.updateMinimalInventoryCache(name, count)
+        if self.inventoryMinimalDirty then
+            return false
         end
 
-        if item.count > 0 then
-            if next(item.metadata) then
-                self.inventoryMinimal[item.name] = {
-                    count = item.count,
-                    metadata = item.metadata,
-                }
-            else
-                self.inventoryMinimal[item.name] = item.count
-            end
-        else
-            self.inventoryMinimal[item.name] = nil
+        if type(name) ~= "string" or type(count) ~= "number" then
+            self.markInventoryDirty()
+            return false
         end
+
+        local item = self.inventory[name]
+        if not item then
+            self.markInventoryDirty()
+            return false
+        end
+
+        local snapshot = self.inventoryMinimal
+        local foundIndex
+
+        for i = 1, #snapshot do
+            local snapshotItem = snapshot[i]
+            if not snapshotItem or snapshotItem.name == nil or type(snapshotItem.count) ~= "number" then
+                self.markInventoryDirty()
+                return false
+            end
+
+            if snapshotItem.name == name then
+                if foundIndex then
+                    self.markInventoryDirty()
+                    return false
+                end
+
+                foundIndex = i
+            end
+        end
+
+        if foundIndex then
+            if count <= 0 then
+                table.remove(snapshot, foundIndex)
+            else
+                snapshot[foundIndex].count = count
+            end
+            return true
+        end
+
+        if count > 0 then
+            snapshot[#snapshot + 1] = {
+                name = name,
+                count = count,
+            }
+        end
+
+        return true
     end
 
     function self.triggerEvent(eventName, ...)
@@ -523,33 +564,34 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.getInventory(minimal)
-        if minimal then
-            if not self.inventoryMinimalDirty then
-                return self.inventoryMinimal
-            end
+        if not minimal then
+            return self.inventory
+        end
 
-            local minimalInventory = {}
-
-            for itemName, v in pairs(self.inventory) do
-                if v.count > 0 then
-                    if next(v.metadata) then
-                        minimalInventory[itemName] = {
-                            count = v.count,
-                            metadata = v.metadata,
-                        }
-                    else
-                        minimalInventory[itemName] = v.count
-                    end
-                end
-            end
-
-            self.inventoryMinimal = minimalInventory
-            self.inventoryMinimalDirty = false
-
+        if not self.inventoryMinimalDirty then
             return self.inventoryMinimal
         end
 
-        return self.inventoryList
+        local snapshot = {}
+        local invalidState = false
+
+        for name, item in pairs(self.inventory) do
+            if item and item.name == name and type(item.count) == "number" then
+                if item.count > 0 then
+                    snapshot[#snapshot + 1] = {
+                        name = item.name,
+                        count = item.count,
+                    }
+                end
+            elseif item ~= nil then
+                invalidState = true
+            end
+        end
+
+        self.inventoryMinimal = snapshot
+        self.inventoryMinimalDirty = invalidState
+
+        return snapshot
     end
 
     function self.getJob()
@@ -627,7 +669,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         Core.MarkPlayerDirty(self, "accounts")
         Core.DebugCounter("account_mutations")
 
-        self.triggerEvent("esx:setAccountMoney", account)
+        Core.QueueAccountSync(self, account)
         TriggerEvent("esx:setAccountMoney", self.source, normalizedName, money, reason)
         return true
     end
@@ -657,7 +699,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         Core.MarkPlayerDirty(self, "accounts")
         Core.DebugCounter("account_mutations")
 
-        self.triggerEvent("esx:setAccountMoney", account)
+        Core.QueueAccountSync(self, account)
         TriggerEvent("esx:addAccountMoney", self.source, normalizedName, money, reason)
         return true
     end
@@ -690,7 +732,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         Core.MarkPlayerDirty(self, "accounts")
         Core.DebugCounter("account_mutations")
 
-        self.triggerEvent("esx:setAccountMoney", account)
+        Core.QueueAccountSync(self, account)
         TriggerEvent("esx:removeAccountMoney", self.source, normalizedName, money, reason)
         return true
     end
@@ -702,14 +744,16 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return inventoryItem
         end
 
-        inventoryItem = normalizeInventoryEntry(itemName, 0, {})
-        if ESX.Items[itemName] then
-            self.inventory[itemName] = inventoryItem
-            self.inventoryList[#self.inventoryList + 1] = inventoryItem
-            self.inventoryArrayDirty = true
-            self.inventoryMinimalDirty = true
-            self.state.inventory[itemName] = 0
+        if not ESX.Items[itemName] then
+            return normalizeInventoryEntry(itemName, 0, {})
         end
+
+        inventoryItem = normalizeInventoryEntry(itemName, 0, {})
+        self.inventory[itemName] = inventoryItem
+        self.inventoryList[#self.inventoryList + 1] = inventoryItem
+        self.inventoryArrayDirty = true
+        self.markInventoryDirty()
+        self.state.inventory[itemName] = 0
 
         return inventoryItem
     end
@@ -737,7 +781,9 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         local nextCount = (inventoryState[item.name] or 0) + count
         inventoryState[item.name] = nextCount
         item.count = nextCount
-        updateMinimalInventoryCache(item)
+        if not self.updateMinimalInventoryCache(item.name, nextCount) then
+            self.markInventoryDirty()
+        end
         self.weight = self.weight + (item.weight * count)
 
         Core.MarkPlayerDirty(self, "inventory")
@@ -751,6 +797,12 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
     function self.removeInventoryItem(itemName, count)
         local startedAt = GetGameTimer()
+        local itemDefinition = ESX.Items[itemName]
+        if not itemDefinition then
+            self.markInventoryDirty()
+            return error(("Tried To Remove Invalid Item ^5%s^1 For Player ^5%s^1!"):format(itemName, self.playerId))
+        end
+
         local item = self.getInventoryItem(itemName)
 
         count = ESX.Math.Round(count)
@@ -767,7 +819,9 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         local nextCount = currentCount - count
         inventoryState[item.name] = nextCount
         item.count = nextCount
-        updateMinimalInventoryCache(item)
+        if not self.updateMinimalInventoryCache(item.name, nextCount) then
+            self.markInventoryDirty()
+        end
         self.weight = self.weight - (item.weight * count)
         if self.weight < 0 then
             self.weight = 0
@@ -783,23 +837,61 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.setInventoryItem(itemName, count)
+        if not ESX.Items[itemName] then
+            self.markInventoryDirty()
+            return false
+        end
+
         local item = self.getInventoryItem(itemName)
 
         count = ESX.Math.Round(count)
-        if item and count >= 0 then
-            local delta = count - (self.state.inventory[item.name] or item.count)
-            if delta == 0 then
-                return true
-            end
-
-            if delta > 0 then
-                return self.addInventoryItem(item.name, delta)
-            end
-
-            return self.removeInventoryItem(item.name, -delta)
+        if not item or count < 0 then
+            return false
         end
 
-        return false
+        local currentCount = self.state.inventory[item.name] or item.count or 0
+        if currentCount == count then
+            return true
+        end
+
+        local delta = count - currentCount
+        self.state.inventory[item.name] = count
+        item.count = count
+        if not self.updateMinimalInventoryCache(item.name, count) then
+            self.markInventoryDirty()
+        end
+
+        self.weight = self.weight + (item.weight * delta)
+        if self.weight < 0 then
+            self.weight = 0
+        end
+
+        Core.MarkPlayerDirty(self, "inventory")
+        Core.QueueInventorySync(self, item.name, item.count, delta, item.label)
+        Core.DebugCounter("inventory_mutations")
+
+        if delta > 0 then
+            TriggerEvent("esx:onAddInventoryItem", self.source, item.name, item.count)
+        else
+            TriggerEvent("esx:onRemoveInventoryItem", self.source, item.name, item.count)
+        end
+
+        return true
+    end
+
+    function self.clearInventory()
+        local inventoryState = self.state.inventory
+
+        for itemName, item in pairs(self.inventory) do
+            inventoryState[itemName] = 0
+            item.count = 0
+        end
+
+        self.weight = 0
+        self.inventoryMinimal = {}
+        self.inventoryMinimalDirty = false
+        Core.MarkPlayerDirty(self, "inventory")
+        Core.DebugCounter("inventory_mutations")
     end
 
     function self.getWeight()
