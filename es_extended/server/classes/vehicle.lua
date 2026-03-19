@@ -1,3 +1,35 @@
+local function dbScalar(query, params, cb)
+	local promiseHandle = not cb and promise.new()
+
+	MySQL.scalar(query, params, function(result)
+		if promiseHandle then
+			promiseHandle:resolve(result)
+		elseif cb then
+			cb(result)
+		end
+	end)
+
+	if promiseHandle then
+		return Citizen.Await(promiseHandle)
+	end
+end
+
+local function dbUpdate(query, params, cb)
+	local promiseHandle = not cb and promise.new()
+
+	MySQL.update(query, params, function(affectedRows)
+		if promiseHandle then
+			promiseHandle:resolve(affectedRows)
+		elseif cb then
+			cb(affectedRows)
+		end
+	end)
+
+	if promiseHandle then
+		return Citizen.Await(promiseHandle)
+	end
+end
+
 ---@class CVehicleData
 ---@field plate string
 ---@field netId number
@@ -31,7 +63,7 @@ Core.vehicleClass = {
 			return xVehicle
 		end
 
-		local vehicleProps = MySQL.scalar.await("SELECT `vehicle` FROM `owned_vehicles` WHERE `stored` = true AND `owner` = ? AND `plate` = ? LIMIT 1", { owner, plate })
+		local vehicleProps = dbScalar("SELECT `vehicle` FROM `owned_vehicles` WHERE `stored` = true AND `owner` = ? AND `plate` = ? LIMIT 1", { owner, plate })
 		if not vehicleProps then
 			return
 		end
@@ -63,7 +95,7 @@ Core.vehicleClass = {
 		}
 		Core.vehicles[plate] = vehicleData
 
-		MySQL.update.await("UPDATE `owned_vehicles` SET `stored` = false WHERE `owner` = ? AND `plate` = ?", { owner, plate })
+		dbUpdate("UPDATE `owned_vehicles` SET `stored` = false WHERE `owner` = ? AND `plate` = ?", { owner, plate })
 
 		local obj = table.clone(Core.vehicleClass)
 		obj.plate = plate
@@ -141,7 +173,7 @@ Core.vehicleClass = {
 		assert(type(newPlate) == "string", "Expected 'plate' to be a string")
 
 		local vehicleData = Core.vehicles[self.plate]
-		local affectedRows = MySQL.update.await("UPDATE `owned_vehicles` SET `plate` = ? WHERE `plate` = ? AND `owner` = ?", { newPlate, vehicleData.plate, vehicleData.owner })
+		local affectedRows = dbUpdate("UPDATE `owned_vehicles` SET `plate` = ? WHERE `plate` = ? AND `owner` = ?", { newPlate, vehicleData.plate, vehicleData.owner })
 		if affectedRows <= 0 then
 			self:delete()
 			return false
@@ -167,7 +199,7 @@ Core.vehicleClass = {
 		assert(type(newProps) == "table", "Expected 'props' to be a table")
 
 		local vehicleData = Core.vehicles[self.plate]
-		local affectedRows = MySQL.update.await("UPDATE `owned_vehicles` SET `vehicle` = ? WHERE `plate` = ? AND `owner` = ?", json.encode(newProps), vehicleData.plate, vehicleData.owner)
+		local affectedRows = dbUpdate("UPDATE `owned_vehicles` SET `vehicle` = ? WHERE `plate` = ? AND `owner` = ?", { json.encode(newProps), vehicleData.plate, vehicleData.owner })
 		if affectedRows <= 0 then
 			self:delete()
 			return false
@@ -188,7 +220,7 @@ Core.vehicleClass = {
 			return true
 		end
 
-		local affectedRows = MySQL.update.await("UPDATE `owned_vehicles` SET `owner` = ? WHERE owner = ? AND `plate` = ?", { newOwner, vehicleData.owner, vehicleData.plate })
+		local affectedRows = dbUpdate("UPDATE `owned_vehicles` SET `owner` = ? WHERE owner = ? AND `plate` = ?", { newOwner, vehicleData.owner, vehicleData.plate })
 		if affectedRows <= 0 then
 			self:delete()
 			return false
@@ -229,7 +261,7 @@ Core.vehicleClass = {
 			queryParams = { garageName, vehicleData.plate, vehicleData.owner }
 		end
 
-		MySQL.update.await(query, queryParams)
+			dbUpdate(query, queryParams)
 		TriggerEvent("esx:deletedExtendedVehicle", self)
 
 		Core.vehicles[self.plate] = nil

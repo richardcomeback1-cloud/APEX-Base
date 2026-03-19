@@ -1,5 +1,50 @@
 local pickups = {}
 local inventoryIndex = {}
+local pickupBuckets = {}
+
+local function getPickupBucketKey(coords)
+    return ("%s:%s"):format(
+        math.floor(coords.x / Config.PickupBucketSize),
+        math.floor(coords.y / Config.PickupBucketSize)
+    )
+end
+
+local function addPickupToBucket(pickupId, pickup)
+    local bucketKey = getPickupBucketKey(pickup.coords)
+    pickup.bucketKey = bucketKey
+    pickupBuckets[bucketKey] = pickupBuckets[bucketKey] or {}
+    pickupBuckets[bucketKey][pickupId] = true
+end
+
+local function removePickupFromBucket(pickupId, pickup)
+    if not pickup or not pickup.bucketKey or not pickupBuckets[pickup.bucketKey] then
+        return
+    end
+
+    pickupBuckets[pickup.bucketKey][pickupId] = nil
+    if not next(pickupBuckets[pickup.bucketKey]) then
+        pickupBuckets[pickup.bucketKey] = nil
+    end
+end
+
+local function getNearbyPickupIds(coords)
+    local nearbyPickupIds = {}
+    local centerX = math.floor(coords.x / Config.PickupBucketSize)
+    local centerY = math.floor(coords.y / Config.PickupBucketSize)
+
+    for offsetX = -1, 1 do
+        for offsetY = -1, 1 do
+            local bucket = pickupBuckets[("%s:%s"):format(centerX + offsetX, centerY + offsetY)]
+            if bucket then
+                for pickupId in pairs(bucket) do
+                    nearbyPickupIds[#nearbyPickupIds + 1] = pickupId
+                end
+            end
+        end
+    end
+
+    return nearbyPickupIds
+end
 
 local function rebuildInventoryIndex()
     inventoryIndex = {}
@@ -295,6 +340,7 @@ if not Config.CustomInventory then
                 inRange = false,
                 coords = coords,
             }
+            addPickupToBucket(pickupId, pickups[pickupId])
         end
 
         if itemType == "item_weapon" then
@@ -334,6 +380,7 @@ end)
 if not Config.CustomInventory then
     ESX.SecureNetEvent("esx:removePickup", function(pickupId)
         if pickups[pickupId] and pickups[pickupId].obj then
+            removePickupFromBucket(pickupId, pickups[pickupId])
             ESX.Game.DeleteObject(pickups[pickupId].obj)
             pickups[pickupId] = nil
         end
@@ -404,8 +451,15 @@ if not Config.CustomInventory then
             local Sleep = 1500
             local playerCoords = GetEntityCoords(ESX.PlayerData.ped)
             local _, closestDistance = ESX.Game.GetClosestPlayer(playerCoords)
+            local nearbyPickupIds = getNearbyPickupIds(playerCoords)
 
-            for pickupId, pickup in pairs(pickups) do
+            for i = 1, #nearbyPickupIds do
+                local pickupId = nearbyPickupIds[i]
+                local pickup = pickups[pickupId]
+                if not pickup then
+                    goto continue
+                end
+
                 local distance = #(playerCoords - pickup.coords)
 
                 if distance < 5 then
@@ -436,6 +490,7 @@ if not Config.CustomInventory then
                 elseif pickup.inRange then
                     pickup.inRange = false
                 end
+                ::continue::
             end
             Wait(Sleep)
         end

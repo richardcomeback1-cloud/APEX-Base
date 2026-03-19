@@ -106,6 +106,8 @@ local function onPlayerDropped(playerId, reason, cb)
         ESX.Players[playerId] = nil
         Core.playersByIdentifier[xPlayer.identifier] = nil
         Core.PlayerCache[playerId] = nil
+        Core.ActiveInventorySync[playerId] = nil
+        Core.PlayerCoords[playerId] = nil
         Core.EventThrottle[playerId] = nil
 
         resolve()
@@ -401,6 +403,7 @@ end)
 
 if not Config.CustomInventory then
     RegisterNetEvent("esx:updateWeaponAmmo", function(weaponName, ammoCount)
+        Core.DebugCounter("event:updateWeaponAmmo")
         if not Core.AllowPlayerEvent(source, "updateWeaponAmmo", Config.EventThrottle.updateWeaponAmmo) then
             return
         end
@@ -414,6 +417,7 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:giveInventoryItem", function(target, itemType, itemName, itemCount)
         local playerId = source
+        Core.DebugCounter("event:giveInventoryItem")
         if not Core.AllowPlayerEvent(playerId, "giveItem", Config.EventThrottle.giveItem) then
             return
         end
@@ -532,6 +536,7 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:removeInventoryItem", function(itemType, itemName, itemCount)
         local playerId = source
+        Core.DebugCounter("event:removeInventoryItem")
         if not Core.AllowPlayerEvent(playerId, "removeInventory", Config.EventThrottle.removeInventory) then
             return
         end
@@ -609,6 +614,7 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:useItem", function(itemName)
         local source = source
+        Core.DebugCounter("event:useItem")
         if not Core.AllowPlayerEvent(source, "useItem", Config.EventThrottle.useItem) then
             return
         end
@@ -629,6 +635,7 @@ if not Config.CustomInventory then
     end)
 
     RegisterNetEvent("esx:onPickup", function(pickupId)
+        Core.DebugCounter("event:onPickup")
         if not Core.AllowPlayerEvent(source, "pickup", Config.EventThrottle.pickup) then
             return
         end
@@ -678,23 +685,36 @@ if not Config.CustomInventory then
     end)
 end
 
-ESX.RegisterServerCallback("esx:getPlayerData", function(source, cb)
+local function buildCallbackPlayerData(xPlayer, fullPayload)
+    local payload = {
+        identifier = xPlayer.identifier,
+        job = xPlayer.getJob(),
+        money = xPlayer.getMoney(),
+        metadata = xPlayer.getMeta(),
+    }
+
+    if fullPayload then
+        payload.accounts = xPlayer.getAccounts()
+        payload.inventory = xPlayer.getInventory()
+        payload.loadout = xPlayer.getLoadout()
+        payload.position = xPlayer.getCoords(true)
+    else
+        payload.accounts = xPlayer.getAccounts(true)
+        payload.inventory = xPlayer.getInventory(true)
+        payload.loadout = xPlayer.getLoadout(true)
+    end
+
+    return payload
+end
+
+ESX.RegisterServerCallback("esx:getPlayerData", function(source, cb, fullPayload)
     local xPlayer = ESX.GetPlayerFromId(source)
 
     if not xPlayer then
         return
     end
 
-    cb({
-        identifier = xPlayer.identifier,
-        accounts = xPlayer.getAccounts(),
-        inventory = xPlayer.getInventory(),
-        job = xPlayer.getJob(),
-        loadout = xPlayer.getLoadout(),
-        money = xPlayer.getMoney(),
-        position = xPlayer.getCoords(true),
-        metadata = xPlayer.getMeta(),
-    })
+    cb(buildCallbackPlayerData(xPlayer, fullPayload == true))
 end)
 
 ESX.RegisterServerCallback("esx:isUserAdmin", function(source, cb)
@@ -705,23 +725,14 @@ ESX.RegisterServerCallback("esx:getGameBuild", function(_, cb)
     cb(tonumber(GetConvar("sv_enforceGameBuild", "1604")))
 end)
 
-ESX.RegisterServerCallback("esx:getOtherPlayerData", function(_, cb, target)
+ESX.RegisterServerCallback("esx:getOtherPlayerData", function(_, cb, target, fullPayload)
     local xPlayer = ESX.GetPlayerFromId(target)
 
     if not xPlayer then
         return
     end
 
-    cb({
-        identifier = xPlayer.identifier,
-        accounts = xPlayer.getAccounts(),
-        inventory = xPlayer.getInventory(),
-        job = xPlayer.getJob(),
-        loadout = xPlayer.getLoadout(),
-        money = xPlayer.getMoney(),
-        position = xPlayer.getCoords(true),
-        metadata = xPlayer.getMeta(),
-    })
+    cb(buildCallbackPlayerData(xPlayer, fullPayload == true))
 end)
 
 ESX.RegisterServerCallback("esx:getPlayerNames", function(source, cb, players)

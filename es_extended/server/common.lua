@@ -13,8 +13,11 @@ Core.playersByIdentifier = {}
 Core.JobsLoaded = false
 Core.PlayerCache = {}
 Core.SaveQueue = {}
+Core.ActiveInventorySync = {}
 Core.LoginQueue = { head = 1, tail = 0, items = {} }
 Core.EventThrottle = {}
+Core.PlayerCoords = {}
+Core.PlayerScopeBuckets = {}
 Core.Performance = {
     counters = {},
     slowPaths = {},
@@ -49,6 +52,52 @@ local function StartInventorySync()
             Core.FlushPendingInventorySync()
         end
     end)
+end
+
+local function getScopeBucketKey(coords)
+    return ("%s:%s"):format(
+        math.floor(coords.x / Config.PlayerScopeBucketSize),
+        math.floor(coords.y / Config.PlayerScopeBucketSize)
+    )
+end
+
+local function StartPlayerScopeCache()
+    CreateThread(function()
+        while true do
+            Wait(Config.PlayerScopeRefreshInterval)
+
+            local scopedPlayers = {}
+            local scopeBuckets = {}
+
+            for source, xPlayer in pairs(ESX.Players) do
+                local ped = GetPlayerPed(source)
+                if ped and ped > 0 then
+                    local coords = GetEntityCoords(ped)
+                    local routingBucket = GetPlayerRoutingBucket(source)
+                    local bucketKey = getScopeBucketKey(coords)
+                    local scopedPlayer = {
+                        coords = coords,
+                        ped = ped,
+                        routingBucket = routingBucket,
+                        bucketKey = bucketKey,
+                    }
+
+                    scopedPlayers[source] = scopedPlayer
+
+                    scopeBuckets[routingBucket] = scopeBuckets[routingBucket] or {}
+                    scopeBuckets[routingBucket][bucketKey] = scopeBuckets[routingBucket][bucketKey] or {}
+                    scopeBuckets[routingBucket][bucketKey][#scopeBuckets[routingBucket][bucketKey] + 1] = source
+                end
+            end
+
+            Core.PlayerCoords = scopedPlayers
+            Core.PlayerScopeBuckets = scopeBuckets
+        end
+    end)
+end
+
+function Core.GetScopeBucketKey(coords)
+    return getScopeBucketKey(coords)
 end
 
 local function StartLoginQueue()
@@ -181,12 +230,19 @@ function Core.QueueInventorySync(xPlayer, itemName, count, delta, displayLabel)
         label = displayLabel,
     }
     cache.nextInventorySyncAt = GetGameTimer() + Config.InventorySyncRateLimit
+    Core.ActiveInventorySync[xPlayer.source] = true
 end
 
 function Core.FlushPendingInventorySync()
     local now = GetGameTimer()
 
-    for source, cache in pairs(Core.PlayerCache) do
+    for source in pairs(Core.ActiveInventorySync) do
+        local cache = Core.PlayerCache[source]
+        if not cache then
+            Core.ActiveInventorySync[source] = nil
+            goto continue
+        end
+
         if next(cache.pendingInventorySync) and cache.nextInventorySyncAt <= now then
             local updates = {}
             local updateIndex = 1
@@ -202,6 +258,11 @@ function Core.FlushPendingInventorySync()
                 Core.DebugCounter("inventory_sync_batches")
             end
         end
+
+        if not next(cache.pendingInventorySync) then
+            Core.ActiveInventorySync[source] = nil
+        end
+        ::continue::
     end
 end
 
@@ -237,6 +298,7 @@ MySQL.ready(function()
     StartDBSync()
     StartInventorySync()
     StartLoginQueue()
+    StartPlayerScopeCache()
     if Config.EnablePaycheck then
         StartPayCheck()
     end
