@@ -300,11 +300,57 @@ AddEventHandler("esx:onPlayerDeath", function()
     ESX.SetPlayerData("dead", true)
 end)
 
+local isResyncingPlayerCache = false
+
+local function resyncPlayerCacheFromServer(cb)
+    if isResyncingPlayerCache then
+        return cb and cb()
+    end
+
+    isResyncingPlayerCache = true
+    ESX.TriggerServerCallback("esx:getPlayerData", function(payload)
+        isResyncingPlayerCache = false
+
+        if not payload then
+            return cb and cb()
+        end
+
+        ESX.SetPlayerData("identifier", payload.identifier)
+        ESX.SetPlayerData("job", payload.job)
+        ESX.SetPlayerData("money", payload.money)
+        ESX.SetPlayerData("metadata", payload.metadata)
+
+        if payload.accounts then
+            ESX.SetPlayerData("accounts", payload.accounts)
+        end
+
+        if payload.inventory then
+            ESX.SetPlayerData("inventory", payload.inventory)
+            rebuildInventoryIndex()
+        end
+
+        if payload.loadout then
+            ESX.SetPlayerData("loadout", payload.loadout)
+        end
+
+        if payload.position then
+            ESX.SetPlayerData("coords", payload.position)
+        end
+
+        if cb then
+            cb()
+        end
+    end, true)
+end
+
 AddEventHandler("skinchanger:modelLoaded", function()
     while not ESX.PlayerLoaded do
         Wait(100)
     end
-    TriggerEvent("esx:restoreLoadout")
+
+    resyncPlayerCacheFromServer(function()
+        TriggerEvent("esx:restoreLoadout")
+    end)
 end)
 
 AddEventHandler("esx:restoreLoadout", function()
