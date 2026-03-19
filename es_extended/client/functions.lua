@@ -130,7 +130,7 @@ function ESX.SpawnPlayer(skin, coords, cb)
 
     RequestCollisionAtCoord(coords.x, coords.y, coords.z)
     while not HasCollisionLoadedAroundEntity(playerPed) and (GetGameTimer() - timer) < 5000 do
-        Wait(0)
+        Wait(10)
     end
 
     NetworkResurrectLocalPlayer(coords.x, coords.y, coords.z, coords.heading, 0, true)
@@ -468,7 +468,7 @@ function ESX.Game.GetPedMugshot(ped, transparent)
     local mugshot = transparent and RegisterPedheadshotTransparent(ped) or RegisterPedheadshot(ped)
 
     while not IsPedheadshotReady(mugshot) do
-        Wait(0)
+        Wait(10)
     end
 
     return mugshot, GetPedheadshotTxdString(mugshot)
@@ -482,7 +482,7 @@ function ESX.Game.Teleport(entity, coords, cb)
     if DoesEntityExist(entity) then
         RequestCollisionAtCoord(coords.x, coords.y, coords.z)
         while not HasCollisionLoadedAroundEntity(entity) do
-            Wait(0)
+            Wait(10)
         end
 
         SetEntityCoords(entity, coords.x, coords.y, coords.z, false, false, false, false)
@@ -581,7 +581,7 @@ function ESX.Game.SpawnVehicle(vehicleModel, coords, heading, cb, networked)
 
         RequestCollisionAtCoord(vector.x, vector.y, vector.z)
         while not HasCollisionLoadedAroundEntity(vehicle) do
-            Wait(0)
+            Wait(10)
         end
 
         if promise then
@@ -743,7 +743,7 @@ function ESX.Game.GetShapeTestResultSync(shape)
 	local handle, hit, coords, normal, material, entity
 	repeat
         handle, hit, coords, normal, material, entity = GetShapeTestResultIncludingMaterial(shape)
-        Wait(0)
+        Wait(10)
 	until handle ~= 1
 	return hit, coords, normal, material, entity
 end

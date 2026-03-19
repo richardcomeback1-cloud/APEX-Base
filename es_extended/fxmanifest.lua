@@ -9,6 +9,7 @@ shared_scripts {
 	'locale.lua',
 
 	'shared/config/main.lua',
+    'shared/config/addon_weapons.lua',
     'shared/config/weapons.lua',
     'shared/config/adjustments.lua',
 
@@ -75,6 +76,8 @@ files {
 	'html/fonts/bankgothic.ttf',
     "client/imports/*.lua",
 }
+
+server_export 'RegisterWeapon'
 
 dependencies {
 	'/native:0x6AE51D4B',

@@ -41,32 +41,6 @@ function Adjustments:HealthRegeneration()
     end
 end
 
-function Adjustments:AmmoAndVehicleRewards()
-end
-
-function Adjustments:FrameLoop()
-    CreateThread(function()
-        while true do
-            if Config.DisableDisplayAmmo then
-                DisplayAmmoThisFrame(false)
-            end
-
-            if Config.DisableVehicleRewards then
-                DisablePlayerVehicleRewards(ESX.playerId)
-            end
-
-            SetPedDensityMultiplierThisFrame(Config.Multipliers.pedDensity)
-            SetScenarioPedDensityMultiplierThisFrame(Config.Multipliers.scenarioPedDensityInterior, Config.Multipliers.scenarioPedDensityExterior)
-            SetAmbientVehicleRangeMultiplierThisFrame(Config.Multipliers.ambientVehicleRange)
-            SetParkedVehicleDensityMultiplierThisFrame(Config.Multipliers.parkedVehicleDensity)
-            SetRandomVehicleDensityMultiplierThisFrame(Config.Multipliers.randomVehicleDensity)
-            SetVehicleDensityMultiplierThisFrame(Config.Multipliers.vehicleDensity)
-
-            Wait(0)
-        end
-    end)
-end
-
 function Adjustments:EnablePvP()
     if Config.EnablePVP then
         SetCanAttackFriendly(ESX.PlayerData.ped, true, false)
@@ -196,22 +170,22 @@ end
 
 function Adjustments:DiscordPresence()
     if Config.DiscordActivity.appId ~= 0 then
-        CreateThread(function()
-            while true do
-                SetDiscordAppId(Config.DiscordActivity.appId)
-                SetRichPresence(self:ReplacePlaceholders(Config.DiscordActivity.presence))
-                SetDiscordRichPresenceAsset(Config.DiscordActivity.assetName)
-                SetDiscordRichPresenceAssetText(self:ReplacePlaceholders(Config.DiscordActivity.assetText))
+        local function refreshDiscordPresence()
+            SetDiscordAppId(Config.DiscordActivity.appId)
+            SetRichPresence(self:ReplacePlaceholders(Config.DiscordActivity.presence))
+            SetDiscordRichPresenceAsset(Config.DiscordActivity.assetName)
+            SetDiscordRichPresenceAssetText(self:ReplacePlaceholders(Config.DiscordActivity.assetText))
 
-                for i = 1, #Config.DiscordActivity.buttons do
-                    local button = Config.DiscordActivity.buttons[i]
-                    local buttonUrl = self:ReplacePlaceholders(button.url)
-                    SetDiscordRichPresenceAction(i - 1, button.label, buttonUrl)
-                end
-
-                Wait(Config.DiscordActivity.refresh)
+            for i = 1, #Config.DiscordActivity.buttons do
+                local button = Config.DiscordActivity.buttons[i]
+                local buttonUrl = self:ReplacePlaceholders(button.url)
+                SetDiscordRichPresenceAction(i - 1, button.label, buttonUrl)
             end
-        end)
+
+            SetTimeout(Config.DiscordActivity.refresh, refreshDiscordPresence)
+        end
+
+        refreshDiscordPresence()
     end
 end
 
@@ -237,7 +211,6 @@ function Adjustments:Load()
     self:DisableNPCDrops()
     self:SeatShuffle()
     self:HealthRegeneration()
-    self:AmmoAndVehicleRewards()
     self:EnablePvP()
     self:DispatchServices()
     self:NPCScenarios()
@@ -245,5 +218,4 @@ function Adjustments:Load()
     self:DiscordPresence()
     self:WantedLevel()
     self:DisableRadio()
-    self:FrameLoop()
 end

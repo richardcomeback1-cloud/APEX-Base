@@ -5,6 +5,23 @@ local pickupRenderState = {
     visible = {},
     promptPickupId = nil,
 }
+local ammoState = {
+    lastAmmo = {},
+    lastSyncTime = {},
+    pending = {},
+    currentWeapon = false,
+}
+local weaponTelemetryState = {
+    lastWeapon = false,
+    shotCount = 0,
+    lastShotAt = 0,
+    minInterval = 0,
+    accumulatedRecoil = 0.0,
+    accumulatedSpread = 0.0,
+    lastCamRot = false,
+    lastSentAt = 0,
+}
+local resetWeaponTelemetry
 
 local function getPickupBucketKey(coords)
     return ("%s:%s"):format(
@@ -122,6 +139,7 @@ end)
 RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
     ESX.PlayerData = xPlayer
     rebuildInventoryIndex()
+    resetWeaponTelemetry(false)
 
     ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
         TriggerEvent("esx:onPlayerSpawn")
@@ -140,7 +158,7 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     local timer = GetGameTimer()
     while not HaveAllStreamingRequestsCompleted(ESX.PlayerData.ped) and (GetGameTimer() - timer) < 2000 do
-        Wait(0)
+        Wait(5)
     end
 
     Adjustments:Load()
@@ -155,7 +173,6 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     Actions:Init()
     StartPointsLoop()
-    StartServerSyncLoops()
     NetworkSetLocalPlayerSyncLookAt(true)
 end)
 
@@ -164,6 +181,7 @@ ESX.SecureNetEvent("esx:onPlayerLogout", function()
     ESX.PlayerLoaded = false
     isFirstSpawn = true
     clearPickupRenderState()
+    resetWeaponTelemetry(false)
 end)
 
 ESX.SecureNetEvent("esx:setMaxWeight", function(newMaxWeight)
@@ -173,6 +191,194 @@ end)
 ESX.SecureNetEvent("esx:setInventory", function(newInventory)
     ESX.SetPlayerData("inventory", newInventory)
     rebuildInventoryIndex()
+end)
+
+local function syncWeaponAmmoState(weaponName, force)
+    if Config.CustomInventory or not weaponName or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponHash = joaat(weaponName)
+    local currentAmmo = GetAmmoInPedWeapon(ESX.PlayerData.ped, weaponHash)
+    local lastAmmo = ammoState.lastAmmo[weaponName]
+    local now = GetGameTimer()
+
+    if not force and currentAmmo == lastAmmo then
+        return
+    end
+
+    if not force and (now - (ammoState.lastSyncTime[weaponName] or 0)) < 250 then
+        return
+    end
+
+    ammoState.lastAmmo[weaponName] = currentAmmo
+    ammoState.lastSyncTime[weaponName] = now
+    LocalPlayer.state:set(("ammo:%s"):format(weaponName), currentAmmo, true)
+end
+
+function resetWeaponTelemetry(weaponName)
+    weaponTelemetryState.lastWeapon = weaponName or false
+    weaponTelemetryState.shotCount = 0
+    weaponTelemetryState.lastShotAt = 0
+    weaponTelemetryState.minInterval = 0
+    weaponTelemetryState.accumulatedRecoil = 0.0
+    weaponTelemetryState.accumulatedSpread = 0.0
+    weaponTelemetryState.lastCamRot = GetGameplayCamRot(2)
+end
+
+local function syncWeaponTelemetry(force)
+    if Config.CustomInventory or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = ammoState.currentWeapon
+    if not weaponName then
+        return
+    end
+
+    local now = GetGameTimer()
+    if not force and (now - weaponTelemetryState.lastSentAt) < Config.WeaponStatebagInterval then
+        return
+    end
+
+    weaponTelemetryState.lastSentAt = now
+    LocalPlayer.state:set("weapon:stats", {
+        weapon = weaponName,
+        shots = weaponTelemetryState.shotCount,
+        minInterval = weaponTelemetryState.minInterval,
+        recoil = weaponTelemetryState.accumulatedRecoil,
+        spread = weaponTelemetryState.accumulatedSpread,
+        timestamp = now,
+    }, true)
+end
+
+local function trackWeaponShot()
+    if not ammoState.currentWeapon or not ESX.PlayerData.ped then
+        return
+    end
+
+    local now = GetGameTimer()
+    if weaponTelemetryState.lastShotAt > 0 and (now - weaponTelemetryState.lastShotAt) < 20 then
+        return
+    end
+
+    local camRot = GetGameplayCamRot(2)
+    local lastCamRot = weaponTelemetryState.lastCamRot or camRot
+    local recoilDelta = math.abs(camRot.x - lastCamRot.x) + math.abs(camRot.y - lastCamRot.y)
+    local spreadDelta = math.abs(camRot.z - lastCamRot.z) * 0.001
+
+    if weaponTelemetryState.lastShotAt > 0 then
+        local interval = now - weaponTelemetryState.lastShotAt
+        if weaponTelemetryState.minInterval == 0 or interval < weaponTelemetryState.minInterval then
+            weaponTelemetryState.minInterval = interval
+        end
+    end
+
+    weaponTelemetryState.shotCount += 1
+    weaponTelemetryState.lastShotAt = now
+    weaponTelemetryState.accumulatedRecoil += recoilDelta
+    weaponTelemetryState.accumulatedSpread += spreadDelta
+    weaponTelemetryState.lastCamRot = camRot
+end
+
+local function scheduleWeaponAmmoSync(weaponName, delay, force)
+    if ammoState.pending[weaponName] then
+        return
+    end
+
+    ammoState.pending[weaponName] = true
+    SetTimeout(delay or 0, function()
+        ammoState.pending[weaponName] = nil
+        syncWeaponAmmoState(weaponName, force == true)
+    end)
+end
+
+AddEventHandler("esx:weaponChanged", function(weaponHash)
+    local previousWeapon = ammoState.currentWeapon
+    if previousWeapon and previousWeapon ~= false then
+        scheduleWeaponAmmoSync(previousWeapon, 0, true)
+    end
+
+    if not weaponHash or weaponHash == false or weaponHash == `WEAPON_UNARMED` then
+        ammoState.currentWeapon = false
+        resetWeaponTelemetry(false)
+        return
+    end
+
+    local weaponConfig = ESX.GetWeaponFromHash(weaponHash)
+    if not weaponConfig then
+        ammoState.currentWeapon = false
+        resetWeaponTelemetry(false)
+        return
+    end
+
+    ammoState.currentWeapon = weaponConfig.name
+    ammoState.lastAmmo[weaponConfig.name] = nil
+    resetWeaponTelemetry(weaponConfig.name)
+    scheduleWeaponAmmoSync(weaponConfig.name, 0, true)
+    syncWeaponTelemetry(true)
+end)
+
+AddEventHandler("gameEventTriggered", function(eventName)
+    if Config.CustomInventory or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = ammoState.currentWeapon
+    if not weaponName then
+        return
+    end
+
+    if eventName == "CEventGunShot" or eventName == "CEventGunReload" or IsPedShooting(ESX.PlayerData.ped) or IsPedReloading(ESX.PlayerData.ped) then
+        if IsPedShooting(ESX.PlayerData.ped) then
+            trackWeaponShot()
+            syncWeaponTelemetry(false)
+        end
+
+        scheduleWeaponAmmoSync(weaponName, IsPedReloading(ESX.PlayerData.ped) and 250 or 0, false)
+    end
+
+    if eventName == "CEventParachuteDeploy" or eventName == "CEventParachuteLanding" then
+        ammoState.lastAmmo.GADGET_PARACHUTE = nil
+        scheduleWeaponAmmoSync("GADGET_PARACHUTE", 0, true)
+    end
+end)
+
+CreateThread(function()
+    while true do
+        Wait(Config.WeaponStatebagInterval)
+
+        if not ESX.PlayerLoaded or Config.CustomInventory or not ESX.PlayerData.ped or not ammoState.currentWeapon then
+            goto continue
+        end
+
+        if IsPedShooting(ESX.PlayerData.ped) then
+            trackWeaponShot()
+        end
+
+        if IsPedShooting(ESX.PlayerData.ped) or IsPedReloading(ESX.PlayerData.ped) then
+            scheduleWeaponAmmoSync(ammoState.currentWeapon, 0, false)
+            syncWeaponTelemetry(false)
+        end
+
+        ::continue::
+    end
+end)
+
+AddStateBagChangeHandler(nil, nil, function(bagName, key, value, _, replicated)
+    if not replicated or type(key) ~= "string" or key:sub(1, 5) ~= "ammo:" then
+        return
+    end
+
+    if bagName ~= ("player:%s"):format(ESX.serverId) or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = key:sub(6)
+    local ammoCount = math.max(0, math.floor(tonumber(value) or 0))
+    SetPedAmmo(ESX.PlayerData.ped, joaat(weaponName), ammoCount)
+    ammoState.lastAmmo[weaponName] = ammoCount
+    ammoState.lastSyncTime[weaponName] = GetGameTimer()
 end)
 
 local function onPlayerSpawn()
@@ -202,11 +408,57 @@ AddEventHandler("esx:onPlayerDeath", function()
     ESX.SetPlayerData("dead", true)
 end)
 
+local isResyncingPlayerCache = false
+
+local function resyncPlayerCacheFromServer(cb)
+    if isResyncingPlayerCache then
+        return cb and cb()
+    end
+
+    isResyncingPlayerCache = true
+    ESX.TriggerServerCallback("esx:getPlayerData", function(payload)
+        isResyncingPlayerCache = false
+
+        if not payload then
+            return cb and cb()
+        end
+
+        ESX.SetPlayerData("identifier", payload.identifier)
+        ESX.SetPlayerData("job", payload.job)
+        ESX.SetPlayerData("money", payload.money)
+        ESX.SetPlayerData("metadata", payload.metadata)
+
+        if payload.accounts then
+            ESX.SetPlayerData("accounts", payload.accounts)
+        end
+
+        if payload.inventory then
+            ESX.SetPlayerData("inventory", payload.inventory)
+            rebuildInventoryIndex()
+        end
+
+        if payload.loadout then
+            ESX.SetPlayerData("loadout", payload.loadout)
+        end
+
+        if payload.position then
+            ESX.SetPlayerData("coords", payload.position)
+        end
+
+        if cb then
+            cb()
+        end
+    end, true)
+end
+
 AddEventHandler("skinchanger:modelLoaded", function()
     while not ESX.PlayerLoaded do
         Wait(100)
     end
-    TriggerEvent("esx:restoreLoadout")
+
+    resyncPlayerCacheFromServer(function()
+        TriggerEvent("esx:restoreLoadout")
+    end)
 end)
 
 AddEventHandler("esx:restoreLoadout", function()
@@ -279,6 +531,25 @@ ESX.SecureNetEvent("esx:setAccountMoney", function(account)
     end
 
     ESX.SetPlayerData("accounts", ESX.PlayerData.accounts)
+end)
+
+ESX.SecureNetEvent("esx:updateAccounts", function(updates)
+    local accounts = ESX.PlayerData.accounts
+    if not accounts then
+        return
+    end
+
+    for i = 1, #updates do
+        local update = updates[i]
+        for accountIndex = 1, #accounts do
+            if accounts[accountIndex].name == update.name then
+                accounts[accountIndex] = update
+                break
+            end
+        end
+    end
+
+    ESX.SetPlayerData("accounts", accounts)
 end)
 
 if not Config.CustomInventory then
@@ -444,130 +715,68 @@ if not Config.CustomInventory then
     end)
 end
 
-function StartServerSyncLoops()
-    if Config.CustomInventory then return end
-
-    local currentWeapon = {
-        ---@type number
-        ---@diagnostic disable-next-line: assign-type-mismatch
-        hash = `WEAPON_UNARMED`,
-        ammo = 0,
-    }
-
-    local function updateCurrentWeaponAmmo(weaponName)
-        local newAmmo = GetAmmoInPedWeapon(ESX.PlayerData.ped, currentWeapon.hash)
-
-        if newAmmo ~= currentWeapon.ammo then
-            currentWeapon.ammo = newAmmo
-            TriggerServerEvent("esx:updateWeaponAmmo", weaponName, newAmmo)
-        end
+if not Config.CustomInventory then
+    local function schedulePickupScan()
+        local hasVisiblePickups = refreshPickupRenderState()
+        SetTimeout(hasVisiblePickups and Config.PickupScanInterval or Config.PickupIdleInterval, schedulePickupScan)
     end
 
-    CreateThread(function()
-        while ESX.PlayerLoaded do
-            currentWeapon.hash = GetSelectedPedWeapon(ESX.PlayerData.ped)
+    local function renderVisiblePickups()
+        if not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+            clearPickupRenderState()
+            return SetTimeout(Config.PickupIdleInterval, renderVisiblePickups)
+        end
 
-            if currentWeapon.hash ~= `WEAPON_UNARMED` then
-                local weaponConfig = ESX.GetWeaponFromHash(currentWeapon.hash)
+        local visiblePickups = pickupRenderState.visible
+        if #visiblePickups == 0 then
+            return SetTimeout(Config.PickupIdleInterval, renderVisiblePickups)
+        end
 
-                if weaponConfig then
-                    currentWeapon.ammo = GetAmmoInPedWeapon(ESX.PlayerData.ped, currentWeapon.hash)
+        local promptPickupId = pickupRenderState.promptPickupId
+        local ped = ESX.PlayerData.ped
 
-                    while GetSelectedPedWeapon(ESX.PlayerData.ped) == currentWeapon.hash do
-                        updateCurrentWeaponAmmo(weaponConfig.name)
-                        Wait(1000)
-                    end
+        for i = 1, #visiblePickups do
+            local pickupState = visiblePickups[i]
+            local pickup = pickups[pickupState.id]
 
-                    updateCurrentWeaponAmmo(weaponConfig.name)
+            if pickup then
+                local label = pickup.label
+
+                if pickupState.id == promptPickupId then
+                    label = ("%s~n~%s"):format(label, TranslateCap("threw_pickup_prompt"))
+                elseif pickup.inRange then
+                    pickup.inRange = false
+                end
+
+                local textCoords = pickup.coords + vector3(0.0, 0.0, 0.25)
+                ESX.Game.Utils.DrawText3D(textCoords, label, 1.2, 1)
+            end
+        end
+
+        if promptPickupId and IsControlJustReleased(0, 38) then
+            local pickup = pickups[promptPickupId]
+            if pickup and IsPedOnFoot(ped) and not pickup.inRange then
+                local _, closestDistance = ESX.Game.GetClosestPlayer(GetEntityCoords(ped))
+                if closestDistance == -1 or closestDistance > 3 then
+                    pickup.inRange = true
+
+                    local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
+                    ESX.Streaming.RequestAnimDict(dict)
+                    TaskPlayAnim(ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
+                    RemoveAnimDict(dict)
+                    Wait(1000)
+
+                    TriggerServerEvent("esx:onPickup", promptPickupId)
+                    PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
                 end
             end
-            Wait(250)
         end
-    end)
 
-    CreateThread(function()
-        local PARACHUTE_OPENING <const> = 1
-        local PARACHUTE_OPEN <const> = 2
+        SetTimeout(50, renderVisiblePickups)
+    end
 
-        while ESX.PlayerLoaded do
-            local parachuteState = GetPedParachuteState(ESX.PlayerData.ped)
-
-            if parachuteState == PARACHUTE_OPENING or parachuteState == PARACHUTE_OPEN then
-                TriggerServerEvent("esx:updateWeaponAmmo", "GADGET_PARACHUTE", 0)
-
-                while GetPedParachuteState(ESX.PlayerData.ped) ~= -1 do Wait(1000) end
-            end
-            Wait(500)
-        end
-    end)
-end
-
-if not Config.CustomInventory then
-    CreateThread(function()
-        while true do
-            local hasVisiblePickups = refreshPickupRenderState()
-            Wait(hasVisiblePickups and Config.PickupScanInterval or Config.PickupIdleInterval)
-        end
-    end)
-
-    CreateThread(function()
-        while true do
-            if not ESX.PlayerLoaded or not ESX.PlayerData.ped then
-                clearPickupRenderState()
-                Wait(Config.PickupIdleInterval)
-                goto continue
-            end
-
-            local visiblePickups = pickupRenderState.visible
-            if #visiblePickups == 0 then
-                Wait(Config.PickupIdleInterval)
-                goto continue
-            end
-
-            local promptPickupId = pickupRenderState.promptPickupId
-            local ped = ESX.PlayerData.ped
-
-            for i = 1, #visiblePickups do
-                local pickupState = visiblePickups[i]
-                local pickup = pickups[pickupState.id]
-
-                if pickup then
-                    local label = pickup.label
-
-                    if pickupState.id == promptPickupId then
-                        label = ("%s~n~%s"):format(label, TranslateCap("threw_pickup_prompt"))
-                    elseif pickup.inRange then
-                        pickup.inRange = false
-                    end
-
-                    local textCoords = pickup.coords + vector3(0.0, 0.0, 0.25)
-                    ESX.Game.Utils.DrawText3D(textCoords, label, 1.2, 1)
-                end
-            end
-
-            if promptPickupId and IsControlJustReleased(0, 38) then
-                local pickup = pickups[promptPickupId]
-                if pickup and IsPedOnFoot(ped) and not pickup.inRange then
-                    local _, closestDistance = ESX.Game.GetClosestPlayer(GetEntityCoords(ped))
-                    if closestDistance == -1 or closestDistance > 3 then
-                        pickup.inRange = true
-
-                        local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
-                        ESX.Streaming.RequestAnimDict(dict)
-                        TaskPlayAnim(ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
-                        RemoveAnimDict(dict)
-                        Wait(1000)
-
-                        TriggerServerEvent("esx:onPickup", promptPickupId)
-                        PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
-                    end
-                end
-            end
-
-            Wait(0)
-            ::continue::
-        end
-    end)
+    schedulePickupScan()
+    renderVisiblePickups()
 end
 
 ----- Admin commands from esx_adminplus
@@ -593,7 +802,7 @@ RegisterNetEvent("esx:tpm", function()
         -- Fade screen to hide how clients get teleported.
         DoScreenFadeOut(650)
         while not IsScreenFadedOut() do
-            Wait(0)
+            Wait(5)
         end
 
         local ped, coords = ESX.PlayerData.ped, GetBlipInfoIdCoord(blipMarker)
@@ -618,7 +827,7 @@ RegisterNetEvent("esx:tpm", function()
                 if GetGameTimer() - curTime > 1000 then
                     break
                 end
-                Wait(0)
+                Wait(5)
             end
             NewLoadSceneStop()
             SetPedCoordsKeepVehicle(ped, x, y, z)
@@ -628,17 +837,17 @@ RegisterNetEvent("esx:tpm", function()
                 if GetGameTimer() - curTime > 1000 then
                     break
                 end
-                Wait(0)
+                Wait(5)
             end
 
             -- Get ground coord. As mentioned in the natives, this only works if the client is in render distance.
             found, groundZ = GetGroundZFor_3dCoord(x, y, z, false)
             if found then
-                Wait(0)
+                Wait(5)
                 SetPedCoordsKeepVehicle(ped, x, y, groundZ)
                 break
             end
-            Wait(0)
+            Wait(5)
         end
 
         -- Remove black screen once the loop has ended.
@@ -699,7 +908,7 @@ local function noclipThread()
         if IsControlPressed(1, 173) then
             noclip_pos = GetOffsetFromEntityInWorldCoords(ESX.PlayerData.ped, 0.0, 0.0, -1.0)
         end
-        Wait(0)
+        Wait(5)
     end
 end
 

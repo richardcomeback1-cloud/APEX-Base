@@ -734,10 +734,11 @@ if not Config.CustomInventory then
             local xPlayer = xPlayers[i]
             local minimalInv = xPlayer.getInventory(true)
 
-            for itemName, _ in pairs(minimalInv) do
-                if not ESX.Items[itemName] then
-                    xPlayer.setInventoryItem(itemName, 0)
-                    minimalInv[itemName] = nil
+            for i = #minimalInv, 1, -1 do
+                local snapshotItem = minimalInv[i]
+                if snapshotItem and not ESX.Items[snapshotItem.name] then
+                    xPlayer.setInventoryItem(snapshotItem.name, 0)
+                    table.remove(minimalInv, i)
                 end
             end
 
@@ -751,8 +752,8 @@ if not Config.CustomInventory then
                 inventoryItem.canRemove = itemData.canRemove
             end
 
-            xPlayer.inventoryArrayDirty = true
-            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.getInventory())
+            xPlayer.markInventoryDirty()
+            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.inventoryList)
         end
     end
 

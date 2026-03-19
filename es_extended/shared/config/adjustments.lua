@@ -1,13 +1,12 @@
-Config.DisableHealthRegeneration = false -- Player will no longer regenerate health
-Config.DisableVehicleRewards = false -- Disables Player Receiving weapons from vehicles
-Config.DisableNPCDrops = false -- stops NPCs from dropping weapons on death
-Config.DisableDispatchServices = true -- Disable Dispatch services
-Config.DisableScenarios = true -- Disable Scenarios
-Config.DisableAimAssist = false -- disables AIM assist (mainly on controllers)
-Config.DisableVehicleSeatShuff = false -- Disables vehicle seat shuff
-Config.DisableDisplayAmmo = false -- Disable ammunition display
-Config.EnablePVP = true -- Allow Player to player combat
-Config.EnableWantedLevel = false -- Use Normal GTA wanted Level?
+Config.DisableHealthRegeneration = false -- ปิดการฟื้นฟูพลังชีวิตอัตโนมัติของผู้เล่น
+Config.DisableNPCDrops = false -- ป้องกันไม่ให้ NPC ดรอปอาวุธเมื่อตาย
+Config.DisableDispatchServices = true -- ปิดระบบ Dispatch
+Config.DisableScenarios = true -- ปิด Scenarios ต่าง ๆ
+Config.DisableAimAssist = false -- ปิดระบบช่วยเล็ง (ส่วนใหญ่มีผลกับจอยคอนโทรลเลอร์)
+Config.DisableVehicleSeatShuff = false -- ปิดการสลับที่นั่งอัตโนมัติในรถ
+Config.DisableDisplayAmmo = false -- ปิดการแสดงผลจำนวนกระสุน
+Config.EnablePVP = true -- อนุญาตให้ผู้เล่นต่อสู้กันเอง
+Config.EnableWantedLevel = false -- ใช้ระบบดาวตำรวจแบบปกติของ GTA หรือไม่
 
 Config.RemoveHudComponents = {
     [1] = false, --WANTED_STARS,
@@ -34,47 +33,37 @@ Config.RemoveHudComponents = {
     [22] = false, --HUD_WEAPONS
 }
 
-Config.Multipliers = {
-    pedDensity = 1.0,
-    scenarioPedDensityInterior = 0.0,
-    scenarioPedDensityExterior = 1.0,
-    ambientVehicleRange = 1.0,
-    parkedVehicleDensity = 1.0,
-    randomVehicleDensity = 1.0,
-    vehicleDensity = 1.0
-}
-
--- Pattern string format
---1 will lead to a random number from 0-9.
---A will lead to a random letter from A-Z.
--- . will lead to a random letter or number, with a 50% probability of being either.
---^1 will lead to a literal 1 being emitted.
---^A will lead to a literal A being emitted.
---Any other character will lead to said character being emitted.
--- A string shorter than 8 characters will be padded on the right.
-Config.CustomAIPlates = "........" -- Custom plates for AI vehicles
+-- รูปแบบสตริงของ pattern
+-- 1 จะถูกแทนด้วยตัวเลขสุ่มตั้งแต่ 0-9
+-- A จะถูกแทนด้วยตัวอักษรสุ่มตั้งแต่ A-Z
+-- . จะถูกแทนด้วยตัวอักษรหรือตัวเลขแบบสุ่ม โดยมีโอกาส 50% เท่ากัน
+-- ^1 จะถูกแสดงเป็นเลข 1 ตามตัวอักษรจริง
+-- ^A จะถูกแสดงเป็นตัว A ตามตัวอักษรจริง
+-- อักขระอื่น ๆ จะถูกแสดงตามตัวอักษรนั้นตรง ๆ
+-- หากสตริงสั้นกว่า 8 ตัวอักษร ระบบจะเติมด้านขวาให้ครบ
+Config.CustomAIPlates = "........" -- รูปแบบป้ายทะเบียนสำหรับรถ AI
 
 --[[
-    PlaceHolders:
-    {server_name} - Server Display Name
-    {server_endpoint} - Server IP:Server Port
-    {server_players} - Current Player Count
-    {server_maxplayers} - Max Player Count
+    ตัวแปรแทนค่า:
+    {server_name} - ชื่อแสดงผลของเซิร์ฟเวอร์
+    {server_endpoint} - IP และพอร์ตของเซิร์ฟเวอร์
+    {server_players} - จำนวนผู้เล่นปัจจุบัน
+    {server_maxplayers} - จำนวนผู้เล่นสูงสุด
 
-    {player_name} - Player Name
-    {player_rp_name} - Player RP Name
-    {player_id} - Player ID
-    {player_street} - Player Street Name
+    {player_name} - ชื่อผู้เล่น
+    {player_rp_name} - ชื่อ RP ของผู้เล่น
+    {player_id} - ไอดีผู้เล่น
+    {player_street} - ชื่อถนนที่ผู้เล่นอยู่
 ]]
 
 Config.DiscordActivity = {
-    appId = 0, -- Discord Application ID,
-    assetName = "LargeIcon", --image name for the "large" icon.
-    assetText = "{server_name}", -- Text to display on the asset
+    appId = 0, -- Discord Application ID
+    assetName = "LargeIcon", -- ชื่อรูปภาพสำหรับไอคอนขนาดใหญ่
+    assetText = "{server_name}", -- ข้อความที่จะแสดงบน asset
     buttons = {
         { label = "Join Server", url = "fivem://connect/{server_endpoint}" },
         { label = "Discord", url = "https://discord.esx-framework.org" },
     },
     presence = "{player_name} [{player_id}] | {server_players}/{server_maxplayers}",
-    refresh = 1 * 60 * 1000, -- 1 minute
+    refresh = 1 * 60 * 1000, -- 1 นาที
 }

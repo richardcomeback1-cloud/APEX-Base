@@ -6,7 +6,7 @@ function ESX.Scaleform.ShowFreemodeMessage(title, msg, sec)
     
     local endTime = GetGameTimer() + (sec * 1000)
     while GetGameTimer() < endTime do
-        Wait(0)
+        Wait(1)
         DrawScaleformMovieFullscreen(scaleform, 255, 255, 255, 255, 0)
     end
 
@@ -20,7 +20,7 @@ function ESX.Scaleform.ShowBreakingNews(title, msg, bottom, sec)
 
     local endTime = GetGameTimer() + (sec * 1000)
     while GetGameTimer() < endTime do
-        Wait(0)
+        Wait(1)
         DrawScaleformMovieFullscreen(scaleform, 255, 255, 255, 255, 0)
     end
 
@@ -32,7 +32,7 @@ function ESX.Scaleform.ShowPopupWarning(title, msg, bottom, sec)
 
     local endTime = GetGameTimer() + (sec * 1000)
     while GetGameTimer() < endTime do
-        Wait(0)
+        Wait(1)
         DrawScaleformMovieFullscreen(scaleform, 255, 255, 255, 255, 0)
     end
 
@@ -44,7 +44,7 @@ function ESX.Scaleform.ShowTrafficMovie(sec)
 
     local endTime = GetGameTimer() + (sec * 1000)
     while GetGameTimer() < endTime do
-        Wait(0)
+        Wait(1)
         DrawScaleformMovieFullscreen(scaleform, 255, 255, 255, 255, 0)
     end
 
@@ -55,7 +55,7 @@ function ESX.Scaleform.Utils.RequestScaleformMovie(movie)
     local scaleform = RequestScaleformMovie(movie)
 
     while not HasScaleformMovieLoaded(scaleform) do
-        Wait(0)
+        Wait(1)
     end
 
     return scaleform

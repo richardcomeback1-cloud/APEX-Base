@@ -16,6 +16,178 @@ end
 
 loadPlayer = loadPlayer .. " FROM `users` WHERE identifier = ?"
 
+local function revertWeaponAmmoState(source, key, weapon)
+    Player(source).state:set(key, weapon and weapon.ammo or 0, true)
+end
+
+local function getPlayerWeaponTelemetry(source)
+    return Core.GetPlayerWeaponTelemetry(source)
+end
+
+if not Config.CustomInventory then
+    AddStateBagChangeHandler(nil, nil, function(bagName, key, value, _, replicated)
+        if not replicated or type(key) ~= "string" then
+            return
+        end
+
+        local source = tonumber(bagName:match("^player:(%d+)$"))
+        if not source then
+            return
+        end
+
+        local xPlayer = ESX.Players[source]
+        if not xPlayer then
+            return
+        end
+
+        if key == "weapon:stats" then
+            if type(value) ~= "table" or type(value.weapon) ~= "string" then
+                return
+            end
+
+            local weaponConfig = GetWeaponConfig(value.weapon)
+            if not weaponConfig then
+                Core.FlagPlayerWeapon(source, "invalid_weapon_telemetry", value.weapon)
+                return
+            end
+
+            local telemetry = getPlayerWeaponTelemetry(source)
+            local shotCount = math.max(0, math.floor(tonumber(value.shots) or 0))
+            local minInterval = math.max(0, math.floor(tonumber(value.minInterval) or weaponConfig.minFireInterval or 0))
+            local recoil = math.abs(tonumber(value.recoil) or 0.0)
+            local spread = math.abs(tonumber(value.spread) or 0.0)
+            local suspiciousScore = 0
+
+            if shotCount > 0 and minInterval > 0 and minInterval < ((weaponConfig.minFireInterval or 0) - Config.WeaponAntiCheat.impossibleFireRateGrace) then
+                suspiciousScore += 2
+                Core.FlagPlayerWeapon(source, "impossible_fire_rate", {
+                    weapon = value.weapon,
+                    minInterval = minInterval,
+                    expected = weaponConfig.minFireInterval,
+                })
+            end
+
+            if shotCount >= Config.WeaponAntiCheat.perfectPatternThreshold and recoil <= (weaponConfig.recoilTolerance * 0.15) then
+                suspiciousScore += 1
+                Core.FlagPlayerWeapon(source, "perfect_recoil_pattern", {
+                    weapon = value.weapon,
+                    recoil = recoil,
+                })
+            end
+
+            if shotCount >= Config.WeaponAntiCheat.perfectPatternThreshold and spread <= (weaponConfig.spreadTolerance * 0.15) then
+                suspiciousScore += 1
+                Core.FlagPlayerWeapon(source, "perfect_spread_pattern", {
+                    weapon = value.weapon,
+                    spread = spread,
+                })
+            end
+
+            telemetry.lastWeapon = value.weapon
+            telemetry.lastTelemetryAt = GetGameTimer()
+            telemetry.suspiciousScore = (telemetry.suspiciousScore or 0) + suspiciousScore
+            return
+        end
+
+        if key:sub(1, 5) ~= "ammo:" then
+            return
+        end
+
+        local weaponName = key:sub(6)
+        local weaponConfig = GetWeaponConfig(weaponName)
+        local weapon = xPlayer.loadout[weaponName]
+        if not weaponConfig then
+            Core.FlagPlayerWeapon(source, "invalid_weapon_ammo", weaponName)
+            revertWeaponAmmoState(source, key, weapon)
+            return
+        end
+
+        if not weapon or type(value) ~= "number" then
+            revertWeaponAmmoState(source, key, weapon)
+            return
+        end
+
+        local ammoCount = math.max(0, math.floor(value))
+        local maxAmmo = weaponConfig.maxAmmo or GetWeaponMaxAmmo(weaponName)
+        local ammoSync = xPlayer.cache and xPlayer.cache.ammoSync
+        local now = GetGameTimer()
+
+        if not ammoSync then
+            xPlayer.updateWeaponAmmo(weaponName, ammoCount)
+            return
+        end
+
+        local lastAcceptedAt = ammoSync.acceptedAt[weaponName] or 0
+        if now - lastAcceptedAt < 100 then
+            return
+        end
+
+        local lastServerAmmo = weapon.ammo or 0
+        local maxPositiveDelta = math.max(1, math.floor(maxAmmo * Config.WeaponAntiCheat.maxAmmoDeltaMultiplier))
+        if ammoCount < 0 or ammoCount > maxAmmo or math.abs(ammoCount - lastServerAmmo) > maxPositiveDelta then
+            Core.FlagPlayerWeapon(source, "invalid_ammo_delta", {
+                weapon = weaponName,
+                ammo = ammoCount,
+                serverAmmo = lastServerAmmo,
+                maxAmmo = maxAmmo,
+            })
+            revertWeaponAmmoState(source, key, weapon)
+            return
+        end
+
+        ammoSync.acceptedAt[weaponName] = now
+        ammoSync.lastClientAmmo[weaponName] = ammoCount
+        getPlayerWeaponTelemetry(source).lastAmmoAt[weaponName] = now
+        xPlayer.updateWeaponAmmo(weaponName, ammoCount)
+    end)
+end
+
+AddEventHandler("weaponDamageEvent", function(sender, data)
+    if not Config.WeaponAntiCheat.enabled or type(data) ~= "table" then
+        return
+    end
+
+    local weaponConfig = ESX.GetWeaponFromHash(data.weaponType)
+    if not weaponConfig then
+        return
+    end
+
+    local telemetry = getPlayerWeaponTelemetry(sender)
+    local playerCoords = Core.PlayerCoords[sender]
+    local damage = tonumber(data.weaponDamage) or 0
+    local maxAllowedDamage = (weaponConfig.maxDamage or 0) * Config.WeaponAntiCheat.damageGraceMultiplier
+    local distance = 0.0
+
+    if playerCoords and data.hitGlobalId and NetworkGetEntityFromNetworkId then
+        local targetEntity = NetworkGetEntityFromNetworkId(data.hitGlobalId)
+        if targetEntity and targetEntity ~= 0 then
+            distance = #(playerCoords.coords - GetEntityCoords(targetEntity))
+        end
+    end
+
+    if damage > maxAllowedDamage then
+        Core.FlagPlayerWeapon(sender, "invalid_weapon_damage", {
+            weapon = weaponConfig.name,
+            damage = damage,
+            maxDamage = maxAllowedDamage,
+        })
+        CancelEvent()
+        return
+    end
+
+    if distance > (weaponConfig.maxRange or 9999.0) then
+        Core.FlagPlayerWeapon(sender, "invalid_weapon_range", {
+            weapon = weaponConfig.name,
+            distance = distance,
+            maxRange = weaponConfig.maxRange,
+        })
+        CancelEvent()
+        return
+    end
+
+    telemetry.lastWeapon = weaponConfig.name
+end)
+
 local function createESXPlayer(identifier, playerId)
     local accounts = {}
 
@@ -100,7 +272,7 @@ local function onPlayerDropped(playerId, reason, cb)
         ESX.Players[playerId] = nil
         Core.playersByIdentifier[xPlayer.identifier] = nil
         Core.PlayerCache[playerId] = nil
-        Core.ActiveInventorySync[playerId] = nil
+        Core.ActivePlayerSync[playerId] = nil
         Core.PlayerCoords[playerId] = nil
         Core.EventThrottle[playerId] = nil
 
@@ -128,7 +300,7 @@ end)
 AddEventHandler("playerConnecting", function(_, _, deferrals)
     local playerId = source
     deferrals.defer()
-    Wait(0) -- Required
+    Wait(1) -- Required
     local identifier
 
     -- luacheck: ignore
@@ -169,178 +341,183 @@ AddEventHandler("playerConnecting", function(_, _, deferrals)
     deferrals.done()
 end)
 
+local function decodePlayerField(value, fallback)
+    if not value or value == "" then
+        return fallback
+    end
+
+    local decoded = json.decode(value)
+    if decoded == nil then
+        return fallback
+    end
+
+    return decoded
+end
+
+local function buildPlayerLoadPayload(identifier, playerId, result)
+    local payload = {
+        accounts = {},
+        inventory = decodePlayerField(result.inventory, {}),
+        loadout = {},
+        weight = 0,
+        name = GetPlayerName(playerId),
+        identifier = identifier,
+        firstName = "John",
+        lastName = "Doe",
+        dateofbirth = "01/01/2000",
+        height = 120,
+        dead = false,
+        variables = {},
+        metadata = decodePlayerField(result.metadata, {}),
+    }
+
+    local accounts = decodePlayerField(result.accounts, {})
+    local normalizedAccounts = {}
+    if #accounts > 0 then
+        for i = 1, #accounts do
+            local account = accounts[i]
+            if account and account.name then
+                normalizedAccounts[string.lower(account.name)] = account.money or 0
+            end
+        end
+    else
+        for accountName, money in pairs(accounts) do
+            if type(accountName) == "string" then
+                if type(money) == "table" then
+                    normalizedAccounts[string.lower(accountName)] = money.money or money.amount or 0
+                else
+                    normalizedAccounts[string.lower(accountName)] = money or 0
+                end
+            end
+        end
+    end
+
+    for accountName in pairs(Config.Accounts) do
+        payload.accounts[accountName] = normalizedAccounts[accountName] or Config.StartingAccountMoney[accountName] or 0
+    end
+
+    for accountName, money in pairs(normalizedAccounts) do
+        if payload.accounts[accountName] == nil then
+            payload.accounts[accountName] = money or 0
+        end
+    end
+
+    local job, grade = result.job, tostring(result.job_grade)
+    if not ESX.DoesJobExist(job, grade) then
+        print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
+        job, grade = "unemployed", "0"
+    end
+
+    local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
+    payload.job = {
+        id = jobObject.id,
+        name = jobObject.name,
+        label = jobObject.label,
+        grade = tonumber(grade),
+        grade_name = gradeObject.name,
+        grade_label = gradeObject.label,
+        grade_salary = gradeObject.salary,
+        skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
+        skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
+    }
+
+    if not Config.CustomInventory then
+        local loadout = decodePlayerField(result.loadout, {})
+        for name, weapon in pairs(loadout) do
+            local label = ESX.GetWeaponLabel(name)
+            if label then
+                payload.loadout[#payload.loadout + 1] = {
+                    name = name,
+                    ammo = weapon.ammo,
+                    label = label,
+                    components = weapon.components or {},
+                    tintIndex = weapon.tintIndex or 0,
+                }
+            end
+        end
+    end
+
+    payload.group = result.group == "superadmin" and "admin" or (result.group or "user")
+    if result.group == "superadmin" then
+        print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
+    end
+
+    payload.coords = decodePlayerField(result.position, Config.DefaultSpawns[ESX.Math.Random(1, #Config.DefaultSpawns)])
+    payload.skin = decodePlayerField(result.skin, { sex = result.sex == "f" and 1 or 0 })
+
+    if result.firstname and result.firstname ~= "" then
+        payload.firstName = result.firstname
+        payload.lastName = result.lastname
+        payload.name = ("%s %s"):format(result.firstname, result.lastname)
+        payload.variables.firstName = result.firstname
+        payload.variables.lastName = result.lastname
+
+        if result.dateofbirth then
+            payload.dateofbirth = result.dateofbirth
+            payload.variables.dateofbirth = result.dateofbirth
+        end
+
+        if result.sex then
+            payload.sex = result.sex
+            payload.variables.sex = result.sex
+        end
+
+        if result.height then
+            payload.height = result.height
+            payload.variables.height = result.height
+        end
+    end
+
+    return payload
+end
+
+local function syncLoadedPlayer(xPlayer, payload, playerId, isNew)
+    payload.inventory = xPlayer.inventoryList
+    payload.money = xPlayer.getMoney()
+    payload.maxWeight = xPlayer.getMaxWeight()
+    payload.variables = xPlayer.variables or payload.variables or {}
+
+    TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
+    xPlayer.triggerEvent("esx:playerLoaded", payload, isNew, payload.skin)
+
+    if not Config.CustomInventory then
+        xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
+    end
+
+    xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
+    print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+end
+
 function loadESXPlayer(identifier, playerId, isNew)
     MySQL.prepare(loadPlayer, { identifier }, function(result)
         if not result or GetPlayerPing(playerId) <= 0 then
             return
         end
 
-        local userData = {
-            accounts = {},
-            inventory = {},
-            loadout = {},
-            weight = 0,
-            name = GetPlayerName(playerId),
-            identifier = identifier,
-            firstName = "John",
-            lastName = "Doe",
-            dateofbirth = "01/01/2000",
-            height = 120,
-            dead = false,
-        }
-
-        -- Accounts
-        local accounts = result.accounts
-        accounts = (accounts and accounts ~= "") and json.decode(accounts) or {}
-
-        local normalizedAccounts = {}
-        if #accounts > 0 then
-            for i = 1, #accounts do
-                local account = accounts[i]
-                if account and account.name then
-                    normalizedAccounts[string.lower(account.name)] = account.money or 0
-                end
-            end
-        else
-            for accountName, money in pairs(accounts) do
-                if type(accountName) == "string" then
-                    if type(money) == "table" then
-                        normalizedAccounts[string.lower(accountName)] = money.money or money.amount or 0
-                    else
-                        normalizedAccounts[string.lower(accountName)] = money or 0
-                    end
-                end
-            end
-        end
-        accounts = normalizedAccounts
-
-        for account in pairs(Config.Accounts) do
-            userData.accounts[account] = accounts[account] or Config.StartingAccountMoney[account] or 0
-        end
-
-        for accountName, money in pairs(accounts) do
-            if userData.accounts[accountName] == nil then
-                userData.accounts[accountName] = money or 0
-            end
-        end
-
-        -- Job
-        local job, grade = result.job, tostring(result.job_grade)
-
-        if not ESX.DoesJobExist(job, grade) then
-            print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
-            job, grade = "unemployed", "0"
-        end
-
-        local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
-
-        userData.job = {
-            id = jobObject.id,
-            name = jobObject.name,
-            label = jobObject.label,
-
-            grade = tonumber(grade),
-            grade_name = gradeObject.name,
-            grade_label = gradeObject.label,
-            grade_salary = gradeObject.salary,
-
-            skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
-            skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
-        }
-
-        -- Inventory
-        if result.inventory and result.inventory ~= "" then
-            userData.inventory = json.decode(result.inventory)
-        end
-
-        -- Group
-        if result.group then
-            if result.group == "superadmin" then
-                userData.group = "admin"
-                print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
-            else
-                userData.group = result.group
-            end
-        else
-            userData.group = "user"
-        end
-
-        -- Loadout
-        if not Config.CustomInventory then
-            if result.loadout and result.loadout ~= "" then
-
-                local loadout = json.decode(result.loadout)
-                for name, weapon in pairs(loadout) do
-                    local label = ESX.GetWeaponLabel(name)
-
-                    if label then
-                        userData.loadout[#userData.loadout + 1] = {
-                            name = name,
-                            ammo = weapon.ammo,
-                            label = label,
-                            components = weapon.components or {},
-                            tintIndex = weapon.tintIndex or 0,
-                        }
-                    end
-                end
-            end
-        end
-
-        -- Position
-        userData.coords = json.decode(result.position) or Config.DefaultSpawns[ESX.Math.Random(1,#Config.DefaultSpawns)]
-
-        -- Skin
-        userData.skin = (result.skin and result.skin ~= "") and json.decode(result.skin) or { sex = userData.sex == "f" and 1 or 0 }
-
-        -- Metadata
-        userData.metadata = (result.metadata and result.metadata ~= "") and json.decode(result.metadata) or {}
-
-        -- xPlayer Creation
-        local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
+        local payload = buildPlayerLoadPayload(identifier, playerId, result)
+        local xPlayer = CreateExtendedPlayer(
+            playerId,
+            identifier,
+            payload.group,
+            payload.accounts,
+            payload.inventory,
+            payload.weight,
+            payload.job,
+            payload.loadout,
+            payload.name,
+            payload.coords,
+            payload.metadata
+        )
 
         GlobalState["playerCount"] = GlobalState["playerCount"] + 1
         ESX.Players[playerId] = xPlayer
         Core.playersByIdentifier[identifier] = xPlayer
 
-        -- Identity
-        if result.firstname and result.firstname ~= "" then
-            userData.firstName = result.firstname
-            userData.lastName = result.lastname
+        xPlayer.name = payload.name
+        xPlayer.variables = payload.variables or {}
+        Player(playerId).state:set("name", xPlayer.name, true)
 
-            local name = ("%s %s"):format(result.firstname, result.lastname)
-            userData.name = name
-
-            xPlayer.set("firstName", result.firstname)
-            xPlayer.set("lastName", result.lastname)
-            xPlayer.setName(name)
-
-            if result.dateofbirth then
-                userData.dateofbirth = result.dateofbirth
-                xPlayer.set("dateofbirth", result.dateofbirth)
-            end
-            if result.sex then
-                userData.sex = result.sex
-                xPlayer.set("sex", result.sex)
-            end
-            if result.height then
-                userData.height = result.height
-                xPlayer.set("height", result.height)
-            end
-        end
-
-        userData.inventory = xPlayer.getInventory()
-        TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
-        userData.money = xPlayer.getMoney()
-        userData.maxWeight = xPlayer.getMaxWeight()
-        userData.variables = xPlayer.variables or {}
-        xPlayer.triggerEvent("esx:playerLoaded", userData, isNew, userData.skin)
-
-        if not Config.CustomInventory then
-            xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
-        end
-
-        xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
-        print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+        syncLoadedPlayer(xPlayer, payload, playerId, isNew)
     end)
 end
 
@@ -387,19 +564,6 @@ AddEventHandler("esx:playerLogout", function(playerId, cb)
 end)
 
 if not Config.CustomInventory then
-    RegisterNetEvent("esx:updateWeaponAmmo", function(weaponName, ammoCount)
-        Core.DebugCounter("event:updateWeaponAmmo")
-        if not Core.AllowPlayerEvent(source, "updateWeaponAmmo", Config.EventThrottle.updateWeaponAmmo) then
-            return
-        end
-
-        local xPlayer = ESX.GetPlayerFromId(source)
-
-        if xPlayer then
-            xPlayer.updateWeaponAmmo(weaponName, ammoCount)
-        end
-    end)
-
     RegisterNetEvent("esx:giveInventoryItem", function(target, itemType, itemName, itemCount)
         local playerId = source
         Core.DebugCounter("event:giveInventoryItem")
@@ -680,7 +844,7 @@ local function buildCallbackPlayerData(xPlayer, fullPayload)
 
     if fullPayload then
         payload.accounts = xPlayer.getAccounts()
-        payload.inventory = xPlayer.getInventory()
+        payload.inventory = xPlayer.inventoryList
         payload.loadout = xPlayer.getLoadout()
         payload.position = xPlayer.getCoords(true)
     else
@@ -692,8 +856,12 @@ local function buildCallbackPlayerData(xPlayer, fullPayload)
     return payload
 end
 
+local function getCallbackTargetPlayer(source, target)
+    return ESX.Players[target or source]
+end
+
 ESX.RegisterServerCallback("esx:getPlayerData", function(source, cb, fullPayload)
-    local xPlayer = ESX.GetPlayerFromId(source)
+    local xPlayer = getCallbackTargetPlayer(source)
 
     if not xPlayer then
         return
@@ -711,7 +879,7 @@ ESX.RegisterServerCallback("esx:getGameBuild", function(_, cb)
 end)
 
 ESX.RegisterServerCallback("esx:getOtherPlayerData", function(_, cb, target, fullPayload)
-    local xPlayer = ESX.GetPlayerFromId(target)
+    local xPlayer = getCallbackTargetPlayer(nil, target)
 
     if not xPlayer then
         return
@@ -724,10 +892,10 @@ ESX.RegisterServerCallback("esx:getPlayerNames", function(source, cb, players)
     players[source] = nil
 
     for playerId, _ in pairs(players) do
-        local xPlayer = ESX.GetPlayerFromId(playerId)
+        local xPlayer = ESX.Players[playerId]
 
         if xPlayer then
-            players[playerId] = xPlayer.getName()
+            players[playerId] = xPlayer.name
         else
             players[playerId] = nil
         end
@@ -743,7 +911,7 @@ ESX.RegisterServerCallback("esx:spawnVehicle", function(source, cb, vehData)
             local vehicle = NetworkGetEntityFromNetworkId(id)
             local timeout = 0
             while GetVehiclePedIsIn(ped, false) ~= vehicle and timeout <= 15 do
-                Wait(0)
+                Wait(10)
                 TaskWarpPedIntoVehicle(ped, vehicle, -1)
                 timeout += 1
             end
@@ -779,7 +947,7 @@ local DoNotUse = {
 AddEventHandler("onResourceStart", function(key)
     if DoNotUse[string.lower(key)] then
         while GetResourceState(key) ~= "started" do
-            Wait(0)
+            Wait(50)
         end
 
         StopResource(key)

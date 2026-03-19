@@ -44,8 +44,8 @@ Config.MK2WeaponTints = {
     [32] = TranslateCap('tint_metallic_red_yellow')
 }
 
-Config.Weapons = {
-    -- Melee
+local baseWeaponEntries = {
+    -- อาวุธประชิด
     { name = "WEAPON_DAGGER", label = TranslateCap("weapon_dagger"), components = {} },
     { name = "WEAPON_BAT", label = TranslateCap("weapon_bat"), components = {} },
     { name = "WEAPON_BATTLEAXE", label = TranslateCap("weapon_battleaxe"), components = {} },
@@ -86,7 +86,7 @@ Config.Weapons = {
             { name = "handle_bodyguard", label = TranslateCap("component_handle_bodyguard"), hash = `COMPONENT_SWITCHBLADE_VARMOD_VAR2` },
         },
     },
-    -- Handguns
+    -- ปืนพก
     {
         name = "WEAPON_APPISTOL",
         label = TranslateCap("weapon_appistol"),
@@ -302,7 +302,7 @@ Config.Weapons = {
             { name = "suppressor", label = TranslateCap("component_suppressor"), hash = `COMPONENT_AT_PI_SUPP` },
         },
     },
-    -- Shotguns
+    -- ปืนลูกซอง
     {
         name = "WEAPON_ASSAULTSHOTGUN",
         label = TranslateCap("weapon_assaultshotgun"),
@@ -404,7 +404,7 @@ Config.Weapons = {
             { name = "luxary_finish", label = TranslateCap("component_luxary_finish"), hash = `COMPONENT_SAWNOFFSHOTGUN_VARMOD_LUXE` },
         },
     },
-    -- SMG & LMG
+    -- ปืนกลมือและปืนกลเบา
     {
         name = "WEAPON_ASSAULTSMG",
         label = TranslateCap("weapon_assaultsmg"),
@@ -609,7 +609,7 @@ Config.Weapons = {
         },
     },
     { name = "WEAPON_RAYCARBINE", label = TranslateCap("weapon_raycarbine"), ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_SMG` }, tints = Config.DefaultWeaponTints, components = {} },
-    -- Rifles
+    -- ปืนไรเฟิล
     {
         name = "WEAPON_ADVANCEDRIFLE",
         label = TranslateCap("weapon_advancedrifle"),
@@ -887,7 +887,7 @@ Config.Weapons = {
             { name = "grip", label = TranslateCap("component_grip"), hash = `COMPONENT_AT_AR_AFGRIP` },
         },
     },
-    -- Sniper
+    -- ปืนสไนเปอร์
     {
         name = "WEAPON_HEAVYSNIPER",
         label = TranslateCap("weapon_heavysniper"),
@@ -999,7 +999,7 @@ Config.Weapons = {
             { name = "luxary_finish", label = TranslateCap("component_luxary_finish"), hash = `COMPONENT_SNIPERRIFLE_VARMOD_LUXE` },
         },
     },
-    -- Heavy / Launchers
+    -- อาวุธหนักและเครื่องยิง
     {
         name = "WEAPON_COMPACTLAUNCHER",
         label = TranslateCap("weapon_compactlauncher"),
@@ -1020,7 +1020,7 @@ Config.Weapons = {
     { name = "WEAPON_RAILGUN", label = TranslateCap("weapon_railgun"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_RAILGUN` } },
     { name = "WEAPON_RPG", label = TranslateCap("weapon_rpg"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rockets"), hash = `AMMO_RPG` } },
     { name = "WEAPON_RAYMINIGUN", label = TranslateCap("weapon_rayminigun"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_MINIGUN` } },
-    -- Thrown
+    -- อาวุธขว้าง
     { name = "WEAPON_BALL", label = TranslateCap("weapon_ball"), components = {}, ammo = { label = TranslateCap("ammo_ball"), hash = `AMMO_BALL` }, throwable = true },
     { name = "WEAPON_BZGAS", label = TranslateCap("weapon_bzgas"), components = {}, ammo = { label = TranslateCap("ammo_bzgas"), hash = `AMMO_BZGAS` }, throwable = true },
     { name = "WEAPON_FLARE", label = TranslateCap("weapon_flare"), components = {}, ammo = { label = TranslateCap("ammo_flare"), hash = `AMMO_FLARE` }, throwable = true },
@@ -1033,7 +1033,7 @@ Config.Weapons = {
     { name = "WEAPON_SNOWBALL", label = TranslateCap("weapon_snowball"), components = {}, ammo = { label = TranslateCap("ammo_snowball"), hash = `AMMO_SNOWBALL` }, throwable = true },
     { name = "WEAPON_STICKYBOMB", label = TranslateCap("weapon_stickybomb"), components = {}, ammo = { label = TranslateCap("ammo_stickybomb"), hash = `AMMO_STICKYBOMB` }, throwable = true },
     { name = "WEAPON_SMOKEGRENADE", label = TranslateCap("weapon_smokegrenade"), components = {}, ammo = { label = TranslateCap("ammo_smokebomb"), hash = `AMMO_SMOKEGRENADE` }, throwable = true },
-    -- Tools
+    -- อุปกรณ์
     { name = "WEAPON_FIREEXTINGUISHER", label = TranslateCap("weapon_fireextinguisher"), components = {}, ammo = { label = TranslateCap("ammo_charge"), hash = `AMMO_FIREEXTINGUISHER` } },
     { name = "WEAPON_DIGISCANNER", label = TranslateCap("weapon_digiscanner"), components = {} },
     { name = "GADGET_PARACHUTE", label = TranslateCap("gadget_parachute"), components = {}, throwable = true },
@@ -1106,3 +1106,138 @@ Config.Weapons = {
         },
     },
 }
+
+
+local ammoTypeDefaults = {
+    AMMO_PISTOL = { type = "pistol", maxAmmo = 250 },
+    AMMO_SMG = { type = "smg", maxAmmo = 500 },
+    AMMO_RIFLE = { type = "rifle", maxAmmo = 500 },
+    AMMO_MG = { type = "mg", maxAmmo = 750 },
+    AMMO_SHOTGUN = { type = "shotgun", maxAmmo = 120 },
+    AMMO_SNIPER = { type = "sniper", maxAmmo = 50 },
+    AMMO_SNIPER_REMOTE = { type = "sniper", maxAmmo = 50 },
+    AMMO_GRENADELAUNCHER = { type = "launcher", maxAmmo = 20 },
+    AMMO_RPG = { type = "launcher", maxAmmo = 20 },
+    AMMO_HOMINGLAUNCHER = { type = "launcher", maxAmmo = 20 },
+    AMMO_MINIGUN = { type = "heavy", maxAmmo = 9999 },
+    AMMO_FIREWORK = { type = "launcher", maxAmmo = 20 },
+    AMMO_RAILGUN = { type = "heavy", maxAmmo = 40 },
+    AMMO_RAILGUNXM3 = { type = "heavy", maxAmmo = 40 },
+    AMMO_FLAREGUN = { type = "utility", maxAmmo = 20 },
+    AMMO_FLARE = { type = "throwable", maxAmmo = 25 },
+    AMMO_BALL = { type = "throwable", maxAmmo = 25 },
+    AMMO_BZGAS = { type = "throwable", maxAmmo = 25 },
+    AMMO_GRENADE = { type = "throwable", maxAmmo = 25 },
+    AMMO_MOLOTOV = { type = "throwable", maxAmmo = 25 },
+    AMMO_STICKYBOMB = { type = "throwable", maxAmmo = 25 },
+    AMMO_PROXMINE = { type = "throwable", maxAmmo = 25 },
+    AMMO_PIPEBOMB = { type = "throwable", maxAmmo = 25 },
+    AMMO_SMOKEGRENADE = { type = "throwable", maxAmmo = 25 },
+    AMMO_SNOWBALL = { type = "throwable", maxAmmo = 25 },
+    AMMO_PETROLCAN = { type = "utility", maxAmmo = 4500 },
+    AMMO_FIREEXTINGUISHER = { type = "utility", maxAmmo = 4500 },
+}
+
+local function getAmmoTypeDefaults(weaponData)
+    local ammoData = weaponData and weaponData.ammo
+    if not ammoData or not ammoData.hash then
+        return nil
+    end
+
+    return ammoTypeDefaults[tostring(ammoData.hash)]
+end
+
+local function inferWeaponType(name, data)
+    if data.type and data.type ~= "unknown" then
+        return data.type
+    end
+
+    if data.throwable then
+        return "throwable"
+    end
+
+    local upperName = string.upper(name)
+    for weaponType, patterns in pairs(Config.WeaponTypeNamePatterns or {}) do
+        for i = 1, #patterns do
+            if upperName:find(patterns[i], 1, true) then
+                return weaponType
+            end
+        end
+    end
+
+    local ammoDefaults = getAmmoTypeDefaults(data)
+    return ammoDefaults and ammoDefaults.type or "unknown"
+end
+
+local function normalizeWeaponConfig(name, data)
+    local ammoDefaults = getAmmoTypeDefaults(data)
+    local weaponType = inferWeaponType(name, data)
+    local typeDefaults = (Config.WeaponTypeDefaults and Config.WeaponTypeDefaults[weaponType]) or Config.WeaponTypeDefaults.unknown
+    local weaponData = {
+        label = data.label or name,
+        type = weaponType,
+        maxAmmo = data.maxAmmo or (ammoDefaults and ammoDefaults.maxAmmo) or typeDefaults.maxAmmo or ((data.throwable and 25) or 250),
+        throwable = data.throwable or false,
+        ammo = data.ammo,
+        tints = data.tints,
+        components = data.components or {},
+        minFireInterval = data.minFireInterval or typeDefaults.minFireInterval or 120,
+        maxRange = data.maxRange or typeDefaults.maxRange or 120.0,
+        minDamage = data.minDamage or typeDefaults.minDamage or 0,
+        maxDamage = data.maxDamage or typeDefaults.maxDamage or 75,
+        spreadTolerance = data.spreadTolerance or typeDefaults.spreadTolerance or 0.0035,
+        recoilTolerance = data.recoilTolerance or typeDefaults.recoilTolerance or 8.0,
+    }
+
+    weaponData.name = name
+    return weaponData
+end
+
+Config.BaseWeapons = {}
+
+for i = 1, #baseWeaponEntries do
+    local weapon = baseWeaponEntries[i]
+    Config.BaseWeapons[weapon.name] = normalizeWeaponConfig(weapon.name, weapon)
+end
+
+Config.AddonWeapons = Config.AddonWeapons or {}
+Config.Weapons = {}
+
+local function mergeWeapons(target, source)
+    for weaponName, weaponData in pairs(source) do
+        target[weaponName] = normalizeWeaponConfig(weaponName, weaponData)
+    end
+end
+
+mergeWeapons(Config.Weapons, Config.BaseWeapons)
+mergeWeapons(Config.Weapons, Config.AddonWeapons)
+
+function RegisterAddonWeapon(name, data)
+    if not name or not data then
+        return
+    end
+
+    name = string.upper(name)
+    Config.AddonWeapons[name] = normalizeWeaponConfig(name, data)
+    Config.Weapons[name] = Config.AddonWeapons[name]
+    if ESX and ESX.RefreshWeaponCache then
+        ESX.RefreshWeaponCache(name)
+    end
+
+    return Config.Weapons[name]
+end
+
+function GetWeaponConfig(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+
+    return Config.Weapons[string.upper(name)]
+end
+
+function GetWeaponMaxAmmo(name)
+    local weapon = GetWeaponConfig(name)
+    return weapon and weapon.maxAmmo or 250
+end
+
+exports("RegisterWeapon", RegisterAddonWeapon)

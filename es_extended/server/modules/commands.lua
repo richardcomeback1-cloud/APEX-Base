@@ -106,7 +106,7 @@ ESX.RegisterCommand(
                 end
 
                 for _ = 1, 100 do
-                    Wait(0)
+                    Wait(10)
                     SetPedIntoVehicle(playerPed, vehicle, -1)
 
                     if GetVehiclePedIsIn(playerPed, false) == vehicle then
@@ -480,8 +480,8 @@ if not Config.CustomInventory then
         "clearloadout",
         "admin",
         function(xPlayer, args)
-            for i = #args.playerId.loadout, 1, -1 do
-                args.playerId.removeWeapon(args.playerId.loadout[i].name)
+            for i = #args.playerId.loadoutList, 1, -1 do
+                args.playerId.removeWeapon(args.playerId.loadoutList[i].name)
             end
             TriggerEvent("esx:playerLoadoutCleared", args.playerId)
             if Config.AdminLogging then
