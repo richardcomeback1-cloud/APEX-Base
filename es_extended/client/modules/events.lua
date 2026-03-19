@@ -5,6 +5,12 @@ local pickupRenderState = {
     visible = {},
     promptPickupId = nil,
 }
+local ammoState = {
+    lastAmmo = {},
+    lastSyncTime = {},
+    pending = {},
+    currentWeapon = false,
+}
 
 local function getPickupBucketKey(coords)
     return ("%s:%s"):format(
@@ -155,7 +161,6 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     Actions:Init()
     StartPointsLoop()
-    StartServerSyncLoops()
     NetworkSetLocalPlayerSyncLookAt(true)
 end)
 
@@ -173,6 +178,99 @@ end)
 ESX.SecureNetEvent("esx:setInventory", function(newInventory)
     ESX.SetPlayerData("inventory", newInventory)
     rebuildInventoryIndex()
+end)
+
+local function syncWeaponAmmoState(weaponName, force)
+    if Config.CustomInventory or not weaponName or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponHash = joaat(weaponName)
+    local currentAmmo = GetAmmoInPedWeapon(ESX.PlayerData.ped, weaponHash)
+    local lastAmmo = ammoState.lastAmmo[weaponName]
+    local now = GetGameTimer()
+
+    if not force and currentAmmo == lastAmmo then
+        return
+    end
+
+    if not force and (now - (ammoState.lastSyncTime[weaponName] or 0)) < 250 then
+        return
+    end
+
+    ammoState.lastAmmo[weaponName] = currentAmmo
+    ammoState.lastSyncTime[weaponName] = now
+    LocalPlayer.state:set(("ammo:%s"):format(weaponName), currentAmmo, true)
+end
+
+local function scheduleWeaponAmmoSync(weaponName, delay, force)
+    if ammoState.pending[weaponName] then
+        return
+    end
+
+    ammoState.pending[weaponName] = true
+    SetTimeout(delay or 0, function()
+        ammoState.pending[weaponName] = nil
+        syncWeaponAmmoState(weaponName, force == true)
+    end)
+end
+
+AddEventHandler("esx:weaponChanged", function(weaponHash)
+    local previousWeapon = ammoState.currentWeapon
+    if previousWeapon and previousWeapon ~= false then
+        scheduleWeaponAmmoSync(previousWeapon, 0, true)
+    end
+
+    if not weaponHash or weaponHash == false or weaponHash == `WEAPON_UNARMED` then
+        ammoState.currentWeapon = false
+        return
+    end
+
+    local weaponConfig = ESX.GetWeaponFromHash(weaponHash)
+    if not weaponConfig then
+        ammoState.currentWeapon = false
+        return
+    end
+
+    ammoState.currentWeapon = weaponConfig.name
+    ammoState.lastAmmo[weaponConfig.name] = nil
+    scheduleWeaponAmmoSync(weaponConfig.name, 0, true)
+end)
+
+AddEventHandler("gameEventTriggered", function(eventName)
+    if Config.CustomInventory or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = ammoState.currentWeapon
+    if not weaponName then
+        return
+    end
+
+    if eventName == "CEventGunShot" or eventName == "CEventGunReload" or IsPedShooting(ESX.PlayerData.ped) or IsPedReloading(ESX.PlayerData.ped) then
+        scheduleWeaponAmmoSync(weaponName, IsPedReloading(ESX.PlayerData.ped) and 250 or 0, false)
+    end
+
+    if eventName == "CEventParachuteDeploy" or eventName == "CEventParachuteLanding" then
+        ammoState.lastAmmo.GADGET_PARACHUTE = nil
+        scheduleWeaponAmmoSync("GADGET_PARACHUTE", 0, true)
+    end
+end)
+
+AddStateBagChangeHandler(nil, nil, function(bagName, key, value, _, replicated)
+    if not replicated or type(key) ~= "string" or key:sub(1, 5) ~= "ammo:" then
+        return
+    end
+
+    if bagName ~= ("player:%s"):format(ESX.serverId) or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = key:sub(6)
+    local ammoCount = math.max(0, math.floor(tonumber(value) or 0))
+    SetPedAmmo(ESX.PlayerData.ped, joaat(weaponName), ammoCount)
+    ammoState.lastAmmo[weaponName] = ammoCount
+    ammoState.lastSyncTime[weaponName] = GetGameTimer()
 end)
 
 local function onPlayerSpawn()
@@ -459,64 +557,6 @@ if not Config.CustomInventory then
             if pickupRenderState.promptPickupId == pickupId then
                 pickupRenderState.promptPickupId = nil
             end
-        end
-    end)
-end
-
-function StartServerSyncLoops()
-    if Config.CustomInventory then return end
-
-    local currentWeapon = {
-        ---@type number
-        ---@diagnostic disable-next-line: assign-type-mismatch
-        hash = `WEAPON_UNARMED`,
-        ammo = 0,
-    }
-
-    local function updateCurrentWeaponAmmo(weaponName)
-        local newAmmo = GetAmmoInPedWeapon(ESX.PlayerData.ped, currentWeapon.hash)
-
-        if newAmmo ~= currentWeapon.ammo then
-            currentWeapon.ammo = newAmmo
-            TriggerServerEvent("esx:updateWeaponAmmo", weaponName, newAmmo)
-        end
-    end
-
-    CreateThread(function()
-        while ESX.PlayerLoaded do
-            currentWeapon.hash = GetSelectedPedWeapon(ESX.PlayerData.ped)
-
-            if currentWeapon.hash ~= `WEAPON_UNARMED` then
-                local weaponConfig = ESX.GetWeaponFromHash(currentWeapon.hash)
-
-                if weaponConfig then
-                    currentWeapon.ammo = GetAmmoInPedWeapon(ESX.PlayerData.ped, currentWeapon.hash)
-
-                    while GetSelectedPedWeapon(ESX.PlayerData.ped) == currentWeapon.hash do
-                        updateCurrentWeaponAmmo(weaponConfig.name)
-                        Wait(1000)
-                    end
-
-                    updateCurrentWeaponAmmo(weaponConfig.name)
-                end
-            end
-            Wait(250)
-        end
-    end)
-
-    CreateThread(function()
-        local PARACHUTE_OPENING <const> = 1
-        local PARACHUTE_OPEN <const> = 2
-
-        while ESX.PlayerLoaded do
-            local parachuteState = GetPedParachuteState(ESX.PlayerData.ped)
-
-            if parachuteState == PARACHUTE_OPENING or parachuteState == PARACHUTE_OPEN then
-                TriggerServerEvent("esx:updateWeaponAmmo", "GADGET_PARACHUTE", 0)
-
-                while GetPedParachuteState(ESX.PlayerData.ped) ~= -1 do Wait(1000) end
-            end
-            Wait(500)
         end
     end)
 end

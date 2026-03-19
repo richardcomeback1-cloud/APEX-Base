@@ -221,6 +221,10 @@ function Core.BindPlayerCache(xPlayer)
             inventory = {},
         },
         nextSyncAt = 0,
+        ammoSync = {
+            acceptedAt = {},
+            lastClientAmmo = {},
+        },
     }
     cache.dirtyFlags = cache.dirty
 

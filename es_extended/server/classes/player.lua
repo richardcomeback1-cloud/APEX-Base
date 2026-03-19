@@ -123,7 +123,7 @@
 ---@field identifier string         # Unique identifier (Steam Hex).
 ---@field inventory table<string, ESXInventoryItem> # Player's inventory items keyed by item name.
 ---@field job ESXJob                # Player's current job.
----@field loadout ESXInventoryWeapon[] # Player's current weapons.
+---@field loadout table<string, ESXInventoryWeapon> # Player's current weapons keyed by weapon name.
 ---@field name string               # Player's display name.
 ---@field playerId number           # Player's ID (server ID).
 ---@field source number             # Player's source (alias for playerId).
@@ -273,7 +273,8 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     self.inventoryMinimal = {}
     self.inventoryMinimalDirty = true
     self.job = job
-    self.loadout = loadout
+    self.loadout = {}
+    self.loadoutList = {}
     self.name = name
     self.playerId = playerId
     self.source = playerId
@@ -329,6 +330,15 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         self.inventory[itemName] = normalizedItem
         self.inventoryList[#self.inventoryList + 1] = normalizedItem
         self.state.inventory[itemName] = normalizedItem.count
+    end
+
+    for i = 1, #(loadout or {}) do
+        local weapon = loadout[i]
+        if weapon and weapon.name then
+            self.loadout[weapon.name] = weapon
+            self.loadoutList[#self.loadoutList + 1] = weapon
+            stateBag:set(("ammo:%s"):format(weapon.name), weapon.ammo or 0, true)
+        end
     end
 
     table.sort(self.inventoryList, function(a, b)
@@ -600,14 +610,14 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
     function self.getLoadout(minimal)
         if not minimal then
-            return self.loadout
+            return self.loadoutList
         end
         local minimalLoadout = {}
 
-        for _, v in ipairs(self.loadout) do
-            minimalLoadout[v.name] = { ammo = v.ammo }
+        for weaponName, v in pairs(self.loadout) do
+            minimalLoadout[weaponName] = { ammo = v.ammo }
             if v.tintIndex > 0 then
-                minimalLoadout[v.name].tintIndex = v.tintIndex
+                minimalLoadout[weaponName].tintIndex = v.tintIndex
             end
 
             if #v.components > 0 then
@@ -620,7 +630,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
                 end
 
                 if #components > 0 then
-                    minimalLoadout[v.name].components = components
+                    minimalLoadout[weaponName].components = components
                 end
             end
         end
@@ -996,30 +1006,33 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
         if not self.hasWeapon(weaponName) then
             local weaponLabel <const> = ESX.GetWeaponLabel(weaponName)
 
-            table.insert(self.loadout, {
+            local weapon = {
                 name = weaponName,
                 ammo = ammo,
                 label = weaponLabel,
                 components = {},
                 tintIndex = 0,
-            })
+            }
+            self.loadout[weaponName] = weapon
+            self.loadoutList[#self.loadoutList + 1] = weapon
 
             GiveWeaponToPed(GetPlayerPed(self.source), joaat(weaponName), ammo, false, false)
             Core.MarkPlayerDirty(self, "loadout")
+            Player(self.source).state:set(("ammo:%s"):format(weaponName), ammo, true)
             self.triggerEvent("esx:addInventoryItem", weaponLabel, false, true)
             self.triggerEvent("esx:addLoadoutItem", weaponName, weaponLabel, ammo)
         end
     end
 
     function self.addWeaponComponent(weaponName, weaponComponent)
-        local loadoutNum <const>, weapon <const> = self.getWeapon(weaponName)
+        local _, weapon <const> = self.getWeapon(weaponName)
 
         if weapon then
             local component = ESX.GetWeaponComponent(weaponName, weaponComponent)
 
             if component then
                 if not self.hasWeaponComponent(weaponName, weaponComponent) then
-                    self.loadout[loadoutNum].components[#self.loadout[loadoutNum].components + 1] = weaponComponent
+                    weapon.components[#weapon.components + 1] = weaponComponent
                     local componentHash = ESX.GetWeaponComponent(weaponName, weaponComponent).hash
                     GiveWeaponComponentToPed(GetPlayerPed(self.source), joaat(weaponName), componentHash)
                     Core.MarkPlayerDirty(self, "loadout")
@@ -1036,6 +1049,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             weapon.ammo = weapon.ammo + ammoCount
             Core.MarkPlayerDirty(self, "loadout")
             SetPedAmmo(GetPlayerPed(self.source), joaat(weaponName), weapon.ammo)
+            Player(self.source).state:set(("ammo:%s"):format(weaponName), weapon.ammo, true)
         end
     end
 
@@ -1048,6 +1062,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
 
         weapon.ammo = ammoCount
         Core.MarkPlayerDirty(self, "loadout")
+        Player(self.source).state:set(("ammo:%s"):format(weaponName), weapon.ammo, true)
 
         if weapon.ammo <= 0 then
             local _, weaponConfig = ESX.GetWeapon(weaponName)
@@ -1058,13 +1073,13 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.setWeaponTint(weaponName, weaponTintIndex)
-        local loadoutNum <const>, weapon <const> = self.getWeapon(weaponName)
+        local _, weapon <const> = self.getWeapon(weaponName)
 
         if weapon then
             local _, weaponObject <const> = ESX.GetWeapon(weaponName)
 
             if weaponObject.tints and weaponObject.tints[weaponTintIndex] then
-                self.loadout[loadoutNum].tintIndex = weaponTintIndex
+                weapon.tintIndex = weaponTintIndex
                 Core.MarkPlayerDirty(self, "loadout")
                 self.triggerEvent("esx:setWeaponTint", weaponName, weaponTintIndex)
                 self.triggerEvent("esx:addInventoryItem", weaponObject.tints[weaponTintIndex], false, true)
@@ -1089,22 +1104,30 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             return error("xPlayer.removeWeapon ^5invalid^1 player ped!")
         end
 
-        for k, v in ipairs(self.loadout) do
-            if v.name == weaponName then
-                weaponLabel = v.label
+        local weapon = self.loadout[weaponName]
+        if weapon then
+            weaponLabel = weapon.label
 
-                for _, v2 in ipairs(v.components) do
+            for _, v2 in ipairs(weapon.components) do
+                if self.hasWeaponComponent(weaponName, v2) then
                     self.removeWeaponComponent(weaponName, v2)
                 end
-
-                local weaponHash = joaat(v.name)
-                RemoveWeaponFromPed(playerPed, weaponHash)
-                SetPedAmmo(playerPed, weaponHash, 0)
-
-                table.remove(self.loadout, k)
-                Core.MarkPlayerDirty(self, "loadout")
-                break
             end
+
+            local weaponHash = joaat(weapon.name)
+            RemoveWeaponFromPed(playerPed, weaponHash)
+            SetPedAmmo(playerPed, weaponHash, 0)
+            self.loadout[weaponName] = nil
+
+            for i = 1, #self.loadoutList do
+                if self.loadoutList[i].name == weaponName then
+                    table.remove(self.loadoutList, i)
+                    break
+                end
+            end
+
+            Player(self.source).state:set(("ammo:%s"):format(weaponName), nil, true)
+            Core.MarkPlayerDirty(self, "loadout")
         end
 
         if weaponLabel then
@@ -1114,16 +1137,16 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.removeWeaponComponent(weaponName, weaponComponent)
-        local loadoutNum <const>, weapon <const> = self.getWeapon(weaponName)
+        local _, weapon <const> = self.getWeapon(weaponName)
 
         if weapon then
             local component <const> = ESX.GetWeaponComponent(weaponName, weaponComponent)
 
             if component then
                 if self.hasWeaponComponent(weaponName, weaponComponent) then
-                    for k, v in ipairs(self.loadout[loadoutNum].components) do
+                    for k, v in ipairs(weapon.components) do
                         if v == weaponComponent then
-                            table.remove(self.loadout[loadoutNum].components, k)
+                            table.remove(weapon.components, k)
                             break
                         end
                     end
@@ -1143,6 +1166,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
             weapon.ammo = weapon.ammo - ammoCount
             Core.MarkPlayerDirty(self, "loadout")
             SetPedAmmo(GetPlayerPed(self.source), joaat(weaponName), weapon.ammo)
+            Player(self.source).state:set(("ammo:%s"):format(weaponName), weapon.ammo, true)
         end
     end
 
@@ -1163,13 +1187,7 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.hasWeapon(weaponName)
-        for _, v in ipairs(self.loadout) do
-            if v.name == weaponName then
-                return true
-            end
-        end
-
-        return false
+        return self.loadout[weaponName] ~= nil
     end
 
     function self.hasItem(item)
@@ -1182,13 +1200,8 @@ function CreateExtendedPlayer(playerId, identifier, group, accounts, inventory, 
     end
 
     function self.getWeapon(weaponName)
-        for k, v in ipairs(self.loadout) do
-            if v.name == weaponName then
-                return k, v
-            end
-        end
-
-        return nil, nil
+        local weapon = self.loadout[weaponName]
+        return weaponName, weapon
     end
 
     function self.showNotification(msg, notifyType, length, title, position)

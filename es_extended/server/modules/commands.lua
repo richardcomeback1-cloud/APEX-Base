@@ -480,8 +480,8 @@ if not Config.CustomInventory then
         "clearloadout",
         "admin",
         function(xPlayer, args)
-            for i = #args.playerId.loadout, 1, -1 do
-                args.playerId.removeWeapon(args.playerId.loadout[i].name)
+            for i = #args.playerId.loadoutList, 1, -1 do
+                args.playerId.removeWeapon(args.playerId.loadoutList[i].name)
             end
             TriggerEvent("esx:playerLoadoutCleared", args.playerId)
             if Config.AdminLogging then
