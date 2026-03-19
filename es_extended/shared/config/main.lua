@@ -23,9 +23,9 @@ Config.Accounts = {
 
 Config.StartingAccountMoney = { bank = 50000 }
 
-Config.StartingInventoryItems = false -- table/false
+Config.StartingInventoryItems = false -- ใช้ค่าเป็นตารางหรือ false
 
-Config.DefaultSpawns = { -- If you want to have more spawn positions and select them randomly uncomment commented code or add more locations
+Config.DefaultSpawns = { -- หากต้องการเพิ่มจุดเกิดและสุ่มใช้งาน ให้เอาคอมเมนต์ออกหรือเพิ่มตำแหน่งใหม่
     { x = 222.2027, y = -864.0162, z = 30.2922, heading = 1.0 },
     --{x = 224.9865, y = -865.0871, z = 30.2922, heading = 1.0},
     --{x = 227.8436, y = -866.0400, z = 30.2922, heading = 1.0},
@@ -38,36 +38,36 @@ Config.AdminGroups = {
     ["admin"] = true,
 }
 
-Config.ValidCharacterSets = { -- Only enable additional charsets if your server is multilingual. By default everything is false.
-    ['el'] = false, -- Greek
-    ['sr'] = false, -- Cyrillic
-    ['he'] = false, -- Hebrew
-    ['ar'] = false, -- Arabic
-    ['zh-cn'] = false -- Chinese, Japanese, Korean
+Config.ValidCharacterSets = { -- เปิดใช้ชุดอักขระเพิ่มเติมเฉพาะเมื่อเซิร์ฟเวอร์ของคุณรองรับหลายภาษา ค่าเริ่มต้นเป็น false ทั้งหมด.
+    ['el'] = false, -- ภาษากรีก
+    ['sr'] = false, -- อักษรซีริลลิก
+    ['he'] = false, -- ภาษาฮิบรู
+    ['ar'] = false, -- ภาษาอาหรับ
+    ['zh-cn'] = false -- จีน ญี่ปุ่น เกาหลี
 }
 
-Config.EnablePaycheck = true -- enable paycheck
-Config.LogPaycheck = false -- Logs paychecks to a nominated Discord channel via webhook (default is false)
-Config.EnableSocietyPayouts = false -- pay from the society account that the player is employed at? Requirement: esx_society
-Config.MaxWeight = 24 -- the max inventory weight without a backpack
-Config.InventoryMode = "limit" -- limit-based inventory mode, weight is ignored for carry validation
-Config.DefaultItemLimit = -1 -- fallback limit when an item definition does not provide one
-Config.PaycheckInterval = 7 * 60000 -- how often to receive paychecks in milliseconds
-Config.SaveInterval = 15000 -- dirty-player autosave flush interval in milliseconds
-Config.InventorySyncInterval = 750 -- inventory delta batch interval in milliseconds
-Config.InventorySyncRateLimit = 500 -- minimum delay between queued sync batches per player in milliseconds
-Config.LoginQueueInterval = 1000 -- login queue processing interval in milliseconds
-Config.LoginQueueBatchSize = 4 -- maximum queued player loads processed per interval
-Config.PaycheckChunkSize = 32 -- players processed per paycheck chunk
-Config.PaycheckChunkDelay = 50 -- wait between paycheck chunks in milliseconds
-Config.PedLoopInterval = 250 -- ped tracking loop interval in milliseconds
-Config.PlayerScopeBucketSize = 128.0 -- server-side player scope spatial bucket size
-Config.PlayerScopeRefreshInterval = 500 -- refresh interval for cached player coords/scope buckets
-Config.PickupBucketSize = 25.0 -- client-side pickup spatial bucket size
-Config.PickupDrawDistance = 5.0 -- 3D text render distance for world pickups
-Config.PickupPromptDistance = 1.0 -- interaction prompt distance for world pickups
-Config.PickupScanInterval = 250 -- pickup proximity refresh interval while nearby pickups are visible
-Config.PickupIdleInterval = 1500 -- pickup proximity refresh interval while no nearby pickups are visible
+Config.EnablePaycheck = true -- เปิดใช้งานเงินเดือน
+Config.LogPaycheck = false -- บันทึกการจ่ายเงินเดือนไปยังห้อง Discord ที่กำหนดผ่าน webhook (ค่าเริ่มต้นคือ false)
+Config.EnableSocietyPayouts = false -- จ่ายเงินจากบัญชี society ของงานที่ผู้เล่นสังกัดอยู่หรือไม่? ต้องใช้ esx_society
+Config.MaxWeight = 24 -- น้ำหนักสูงสุดของกระเป๋าโดยไม่ใส่เป้
+Config.InventoryMode = "limit" -- โหมดกระเป๋าแบบจำกัดจำนวน โดยจะไม่ใช้น้ำหนักในการตรวจสอบการถือของ
+Config.DefaultItemLimit = -1 -- ค่าจำกัดสำรองเมื่อไอเท็มนั้นไม่ได้กำหนด limit ไว้
+Config.PaycheckInterval = 7 * 60000 -- ระยะเวลาการรับเงินเดือน หน่วยเป็นมิลลิวินาที
+Config.SaveInterval = 15000 -- ช่วงเวลาบันทึกข้อมูลผู้เล่นที่มีการเปลี่ยนแปลงอัตโนมัติ หน่วยเป็นมิลลิวินาที
+Config.InventorySyncInterval = 750 -- ช่วงเวลาส่งชุดข้อมูลส่วนต่างของกระเป๋า หน่วยเป็นมิลลิวินาที
+Config.InventorySyncRateLimit = 500 -- ระยะหน่วงขั้นต่ำระหว่างชุด sync ของผู้เล่นแต่ละคน หน่วยเป็นมิลลิวินาที
+Config.LoginQueueInterval = 1000 -- ช่วงเวลาประมวลผลคิวเข้าสู่ระบบ หน่วยเป็นมิลลิวินาที
+Config.LoginQueueBatchSize = 4 -- จำนวนผู้เล่นสูงสุดที่ประมวลผลจากคิวต่อรอบ
+Config.PaycheckChunkSize = 32 -- จำนวนผู้เล่นที่ประมวลผลต่อหนึ่งชุดของการจ่ายเงินเดือน
+Config.PaycheckChunkDelay = 50 -- ระยะเวลาหน่วงระหว่างแต่ละชุดการจ่ายเงินเดือน หน่วยเป็นมิลลิวินาที
+Config.PedLoopInterval = 250 -- ช่วงเวลาลูปติดตาม ped หน่วยเป็นมิลลิวินาที
+Config.PlayerScopeBucketSize = 128.0 -- ขนาด bucket เชิงพื้นที่สำหรับขอบเขตผู้เล่นฝั่งเซิร์ฟเวอร์
+Config.PlayerScopeRefreshInterval = 500 -- ช่วงเวลารีเฟรช cache ตำแหน่งผู้เล่นและ scope bucket
+Config.PickupBucketSize = 25.0 -- ขนาด bucket เชิงพื้นที่ของ pickup ฝั่งไคลเอนต์
+Config.PickupDrawDistance = 5.0 -- ระยะเรนเดอร์ข้อความ 3 มิติสำหรับ pickup ในโลก
+Config.PickupPromptDistance = 1.0 -- ระยะแสดงปุ่มโต้ตอบสำหรับ pickup ในโลก
+Config.PickupScanInterval = 250 -- ช่วงเวลารีเฟรชการตรวจจับ pickup เมื่อมี pickup อยู่ใกล้และมองเห็นได้
+Config.PickupIdleInterval = 1500 -- ช่วงเวลารีเฟรชการตรวจจับ pickup เมื่อไม่มี pickup ใกล้ตัว
 Config.EventThrottle = {
     giveItem = 250,
     removeInventory = 250,
@@ -75,9 +75,9 @@ Config.EventThrottle = {
     pickup = 250,
     updateWeaponAmmo = 200,
 }
-Config.WeaponStatebagInterval = 200 -- client-to-server weapon telemetry throttle in milliseconds
-Config.WeaponTelemetryWindow = 4000 -- rolling telemetry window per player in milliseconds
-Config.WeaponAutoDetect = true -- automatically scan resources for addon weapon meta files
+Config.WeaponStatebagInterval = 200 -- ช่วงเวลาหน่วงการส่ง telemetry อาวุธจากไคลเอนต์ไปเซิร์ฟเวอร์ หน่วยเป็นมิลลิวินาที
+Config.WeaponTelemetryWindow = 4000 -- หน้าต่างเวลา telemetry แบบเลื่อนต่อผู้เล่น หน่วยเป็นมิลลิวินาที
+Config.WeaponAutoDetect = true -- สแกน resource เพื่อหาไฟล์ meta ของอาวุธเสริมโดยอัตโนมัติ
 Config.WeaponAutoDetectFiles = {
     "weapons.meta",
     "weaponcomponents.meta",
@@ -107,24 +107,24 @@ Config.WeaponTypeDefaults = {
 }
 Config.WeaponAntiCheat = {
     enabled = true,
-    maxAmmoDeltaMultiplier = 1.0, -- maximum allowed positive delta relative to weapon max ammo
-    perfectPatternThreshold = 6, -- consecutive low-variance samples before recoil/spread flag
-    suspiciousScoreLimit = 5, -- threshold before a player is considered suspicious for weapon cheats
-    damageGraceMultiplier = 1.25, -- allowed damage variance over configured max damage
-    impossibleFireRateGrace = 20, -- extra milliseconds tolerated under configured min fire interval
+    maxAmmoDeltaMultiplier = 1.0, -- ค่าการเพิ่มขึ้นสูงสุดของกระสุนที่ยอมรับได้เมื่อเทียบกับ max ammo ของอาวุธ
+    perfectPatternThreshold = 6, -- จำนวนตัวอย่างความแปรปรวนต่ำต่อเนื่องก่อนปักธงเรื่อง recoil/spread
+    suspiciousScoreLimit = 5, -- คะแนนขั้นต่ำก่อนถือว่าผู้เล่นน่าสงสัยเรื่องโกงอาวุธ
+    damageGraceMultiplier = 1.25, -- ค่าความคลาดเคลื่อนของดาเมจที่ยอมรับได้เหนือ max damage ที่ตั้งไว้
+    impossibleFireRateGrace = 20, -- ค่ามิลลิวินาทีเผื่อเพิ่มเติมที่ยอมรับได้ต่ำกว่า min fire interval
 }
-Config.SaveDeathStatus = true -- Save the death status of a player
-Config.EnableDebug = false -- Use Debug options?
-Config.EnablePerformanceDebug = false -- track counters and slow-path warnings
-Config.SlowFunctionWarningMs = 25 -- warn when a hot path exceeds this execution time in debug mode
+Config.SaveDeathStatus = true -- บันทึกสถานะการตายของผู้เล่น
+Config.EnableDebug = false -- เปิดใช้ตัวเลือก Debug หรือไม่
+Config.EnablePerformanceDebug = false -- ติดตามตัวนับและคำเตือนของเส้นทางทำงานที่ช้า
+Config.SlowFunctionWarningMs = 25 -- แจ้งเตือนเมื่อเส้นทางหลักใช้เวลานานเกินค่านี้ในโหมด debug
 
-Config.DefaultJobDuty = true -- A players default duty status when changing jobs
-Config.OffDutyPaycheckMultiplier = 0.5 -- The multiplier for off duty paychecks. 0.5 = 50% of the on duty paycheck
+Config.DefaultJobDuty = true -- สถานะเข้างานเริ่มต้นของผู้เล่นเมื่อเปลี่ยนอาชีพ
+Config.OffDutyPaycheckMultiplier = 0.5 -- ตัวคูณเงินเดือนตอนนอกเวลางาน เช่น 0.5 = 50% ของเงินเดือนตอนเข้างาน
 
-Config.Multichar = false -- single-character only
-Config.Identity = true -- keep character identity fields for single-character servers if desired
-Config.DistanceGive = 4.0 -- Max distance when giving items, weapons etc.
+Config.Multichar = false -- ใช้เฉพาะระบบตัวละครเดียว
+Config.Identity = true -- เก็บข้อมูลตัวตนของตัวละครไว้สำหรับเซิร์ฟเวอร์ตัวละครเดียวหากต้องการ
+Config.DistanceGive = 4.0 -- ระยะสูงสุดในการให้ไอเท็ม อาวุธ และอื่น ๆ
 
-Config.AdminLogging = false -- Logs the usage of certain commands by those with group.admin ace permissions (default is false)
+Config.AdminLogging = false -- บันทึกการใช้คำสั่งบางอย่างของผู้ที่มีสิทธิ์ group.admin ace (ค่าเริ่มต้นคือ false)
 
-Config.EnableDefaultInventory = Config.CustomInventory == false -- Display the default Inventory ( F2 )
+Config.EnableDefaultInventory = Config.CustomInventory == false -- แสดงกระเป๋าแบบเริ่มต้น (F2)

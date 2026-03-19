@@ -45,7 +45,7 @@ Config.MK2WeaponTints = {
 }
 
 local baseWeaponEntries = {
-    -- Melee
+    -- อาวุธประชิด
     { name = "WEAPON_DAGGER", label = TranslateCap("weapon_dagger"), components = {} },
     { name = "WEAPON_BAT", label = TranslateCap("weapon_bat"), components = {} },
     { name = "WEAPON_BATTLEAXE", label = TranslateCap("weapon_battleaxe"), components = {} },
@@ -86,7 +86,7 @@ local baseWeaponEntries = {
             { name = "handle_bodyguard", label = TranslateCap("component_handle_bodyguard"), hash = `COMPONENT_SWITCHBLADE_VARMOD_VAR2` },
         },
     },
-    -- Handguns
+    -- ปืนพก
     {
         name = "WEAPON_APPISTOL",
         label = TranslateCap("weapon_appistol"),
@@ -302,7 +302,7 @@ local baseWeaponEntries = {
             { name = "suppressor", label = TranslateCap("component_suppressor"), hash = `COMPONENT_AT_PI_SUPP` },
         },
     },
-    -- Shotguns
+    -- ปืนลูกซอง
     {
         name = "WEAPON_ASSAULTSHOTGUN",
         label = TranslateCap("weapon_assaultshotgun"),
@@ -404,7 +404,7 @@ local baseWeaponEntries = {
             { name = "luxary_finish", label = TranslateCap("component_luxary_finish"), hash = `COMPONENT_SAWNOFFSHOTGUN_VARMOD_LUXE` },
         },
     },
-    -- SMG & LMG
+    -- ปืนกลมือและปืนกลเบา
     {
         name = "WEAPON_ASSAULTSMG",
         label = TranslateCap("weapon_assaultsmg"),
@@ -609,7 +609,7 @@ local baseWeaponEntries = {
         },
     },
     { name = "WEAPON_RAYCARBINE", label = TranslateCap("weapon_raycarbine"), ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_SMG` }, tints = Config.DefaultWeaponTints, components = {} },
-    -- Rifles
+    -- ปืนไรเฟิล
     {
         name = "WEAPON_ADVANCEDRIFLE",
         label = TranslateCap("weapon_advancedrifle"),
@@ -887,7 +887,7 @@ local baseWeaponEntries = {
             { name = "grip", label = TranslateCap("component_grip"), hash = `COMPONENT_AT_AR_AFGRIP` },
         },
     },
-    -- Sniper
+    -- ปืนสไนเปอร์
     {
         name = "WEAPON_HEAVYSNIPER",
         label = TranslateCap("weapon_heavysniper"),
@@ -999,7 +999,7 @@ local baseWeaponEntries = {
             { name = "luxary_finish", label = TranslateCap("component_luxary_finish"), hash = `COMPONENT_SNIPERRIFLE_VARMOD_LUXE` },
         },
     },
-    -- Heavy / Launchers
+    -- อาวุธหนักและเครื่องยิง
     {
         name = "WEAPON_COMPACTLAUNCHER",
         label = TranslateCap("weapon_compactlauncher"),
@@ -1020,7 +1020,7 @@ local baseWeaponEntries = {
     { name = "WEAPON_RAILGUN", label = TranslateCap("weapon_railgun"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_RAILGUN` } },
     { name = "WEAPON_RPG", label = TranslateCap("weapon_rpg"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rockets"), hash = `AMMO_RPG` } },
     { name = "WEAPON_RAYMINIGUN", label = TranslateCap("weapon_rayminigun"), tints = Config.DefaultWeaponTints, components = {}, ammo = { label = TranslateCap("ammo_rounds"), hash = `AMMO_MINIGUN` } },
-    -- Thrown
+    -- อาวุธขว้าง
     { name = "WEAPON_BALL", label = TranslateCap("weapon_ball"), components = {}, ammo = { label = TranslateCap("ammo_ball"), hash = `AMMO_BALL` }, throwable = true },
     { name = "WEAPON_BZGAS", label = TranslateCap("weapon_bzgas"), components = {}, ammo = { label = TranslateCap("ammo_bzgas"), hash = `AMMO_BZGAS` }, throwable = true },
     { name = "WEAPON_FLARE", label = TranslateCap("weapon_flare"), components = {}, ammo = { label = TranslateCap("ammo_flare"), hash = `AMMO_FLARE` }, throwable = true },
@@ -1033,7 +1033,7 @@ local baseWeaponEntries = {
     { name = "WEAPON_SNOWBALL", label = TranslateCap("weapon_snowball"), components = {}, ammo = { label = TranslateCap("ammo_snowball"), hash = `AMMO_SNOWBALL` }, throwable = true },
     { name = "WEAPON_STICKYBOMB", label = TranslateCap("weapon_stickybomb"), components = {}, ammo = { label = TranslateCap("ammo_stickybomb"), hash = `AMMO_STICKYBOMB` }, throwable = true },
     { name = "WEAPON_SMOKEGRENADE", label = TranslateCap("weapon_smokegrenade"), components = {}, ammo = { label = TranslateCap("ammo_smokebomb"), hash = `AMMO_SMOKEGRENADE` }, throwable = true },
-    -- Tools
+    -- อุปกรณ์
     { name = "WEAPON_FIREEXTINGUISHER", label = TranslateCap("weapon_fireextinguisher"), components = {}, ammo = { label = TranslateCap("ammo_charge"), hash = `AMMO_FIREEXTINGUISHER` } },
     { name = "WEAPON_DIGISCANNER", label = TranslateCap("weapon_digiscanner"), components = {} },
     { name = "GADGET_PARACHUTE", label = TranslateCap("gadget_parachute"), components = {}, throwable = true },
