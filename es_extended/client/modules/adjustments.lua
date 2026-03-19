@@ -41,9 +41,6 @@ function Adjustments:HealthRegeneration()
     end
 end
 
-function Adjustments:AmmoAndVehicleRewards()
-end
-
 function Adjustments:FrameLoop()
     return false
 end
@@ -218,7 +215,6 @@ function Adjustments:Load()
     self:DisableNPCDrops()
     self:SeatShuffle()
     self:HealthRegeneration()
-    self:AmmoAndVehicleRewards()
     self:EnablePvP()
     self:DispatchServices()
     self:NPCScenarios()
