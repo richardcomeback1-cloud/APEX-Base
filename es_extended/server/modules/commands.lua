@@ -106,7 +106,7 @@ ESX.RegisterCommand(
                 end
 
                 for _ = 1, 100 do
-                    Wait(0)
+                    Wait(10)
                     SetPedIntoVehicle(playerPed, vehicle, -1)
 
                     if GetVehiclePedIsIn(playerPed, false) == vehicle then

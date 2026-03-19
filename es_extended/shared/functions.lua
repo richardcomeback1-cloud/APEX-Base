@@ -226,7 +226,7 @@ function ESX.Await(conditionFunc, errorMessage, timeoutMs)
             return true, result
         end
 
-        Wait(0)
+        Wait(1)
     end
 
     if errorMessage then

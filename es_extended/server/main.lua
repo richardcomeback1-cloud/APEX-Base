@@ -300,7 +300,7 @@ end)
 AddEventHandler("playerConnecting", function(_, _, deferrals)
     local playerId = source
     deferrals.defer()
-    Wait(0) -- Required
+    Wait(1) -- Required
     local identifier
 
     -- luacheck: ignore
@@ -911,7 +911,7 @@ ESX.RegisterServerCallback("esx:spawnVehicle", function(source, cb, vehData)
             local vehicle = NetworkGetEntityFromNetworkId(id)
             local timeout = 0
             while GetVehiclePedIsIn(ped, false) ~= vehicle and timeout <= 15 do
-                Wait(0)
+                Wait(10)
                 TaskWarpPedIntoVehicle(ped, vehicle, -1)
                 timeout += 1
             end
@@ -947,7 +947,7 @@ local DoNotUse = {
 AddEventHandler("onResourceStart", function(key)
     if DoNotUse[string.lower(key)] then
         while GetResourceState(key) ~= "started" do
-            Wait(0)
+            Wait(50)
         end
 
         StopResource(key)

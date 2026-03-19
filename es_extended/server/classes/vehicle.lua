@@ -188,7 +188,7 @@ Core.vehicleClass = {
 		Core.vehicles[oldPlate] = nil
 
 		TriggerEvent("esx:changedExtendedVehiclePlate", vehicleData.plate, oldPlate)
-		Wait(0)
+		Wait(1)
 
 		return true
 	end,
