@@ -123,16 +123,14 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
     ESX.PlayerData = xPlayer
     rebuildInventoryIndex()
 
-    if not Config.Multichar then
-        ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
-            TriggerEvent("esx:onPlayerSpawn")
-            TriggerEvent("esx:restoreLoadout")
-            TriggerServerEvent("esx:onPlayerSpawn")
-            TriggerEvent("esx:loadingScreenOff")
-            ShutdownLoadingScreen()
-            ShutdownLoadingScreenNui()
-        end)
-    end
+    ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
+        TriggerEvent("esx:onPlayerSpawn")
+        TriggerEvent("esx:restoreLoadout")
+        TriggerServerEvent("esx:onPlayerSpawn")
+        TriggerEvent("esx:loadingScreenOff")
+        ShutdownLoadingScreen()
+        ShutdownLoadingScreenNui()
+    end)
 
     while not DoesEntityExist(ESX.PlayerData.ped) do
         Wait(20)
@@ -149,9 +147,7 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     ClearPedTasksImmediately(ESX.PlayerData.ped)
 
-    if not Config.Multichar then
-        Core.FreezePlayer(false)
-    end
+    Core.FreezePlayer(false)
 
     if IsScreenFadedOut() then
         DoScreenFadeIn(500)

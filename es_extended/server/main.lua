@@ -6,21 +6,17 @@ local newPlayer = "INSERT INTO `users` SET `accounts` = ?, `identifier` = ?, `gr
 local loadPlayer = "SELECT `accounts`, `job`, `job_grade`, `group`, `position`, `inventory`, `skin`, `loadout`, `metadata`"
 local missingSteamMessage = "Steam must be running to join this server"
 
-if Config.Multichar then
-    newPlayer = newPlayer .. ", `firstname` = ?, `lastname` = ?, `dateofbirth` = ?, `sex` = ?, `height` = ?"
-end
-
 if Config.StartingInventoryItems then
     newPlayer = newPlayer .. ", `inventory` = ?"
 end
 
-if Config.Multichar or Config.Identity then
+if Config.Identity then
     loadPlayer = loadPlayer .. ", `firstname`, `lastname`, `dateofbirth`, `sex`, `height`"
 end
 
 loadPlayer = loadPlayer .. " FROM `users` WHERE identifier = ?"
 
-local function createESXPlayer(identifier, playerId, data)
+local function createESXPlayer(identifier, playerId)
     local accounts = {}
 
     for account, money in pairs(Config.StartingAccountMoney) do
@@ -32,9 +28,7 @@ local function createESXPlayer(identifier, playerId, data)
         print(("[^2INFO^0] Player ^5%s^0 Has been granted admin permissions via ^5Ace Perms^7."):format(playerId))
         defaultGroup = "admin"
     end
-    local parameters = Config.Multichar and
-        { json.encode(accounts), identifier, defaultGroup, data.firstname, data.lastname, data.dateofbirth, data.sex, data.height }
-        or { json.encode(accounts), identifier, defaultGroup }
+    local parameters = { json.encode(accounts), identifier, defaultGroup }
 
     if Config.StartingInventoryItems then
         table.insert(parameters, json.encode(Config.StartingInventoryItems))
@@ -120,85 +114,60 @@ end
 AddEventHandler("esx:onPlayerDropped", onPlayerDropped)
 
 
-if Config.Multichar then
-    AddEventHandler("esx:onPlayerJoined", function(src, _, data)
-        while not next(ESX.Jobs) do
-            Wait(50)
-        end
+RegisterNetEvent("esx:onPlayerJoined", function()
+    local _source = source
+    while not next(ESX.Jobs) do
+        Wait(50)
+    end
 
-        if not ESX.Players[src] then
-            local identifier = ESX.GetIdentifier(src)
-            if not identifier then
-                return DropPlayer(src, missingSteamMessage)
-            end
+    if not ESX.Players[_source] then
+        onPlayerJoined(_source)
+    end
+end)
 
-            Core.EnqueueLogin(src, function()
-                if data then
-                    createESXPlayer(identifier, src, data)
-                else
-                    loadESXPlayer(identifier, src, false)
-                end
-            end)
-        end
+AddEventHandler("playerConnecting", function(_, _, deferrals)
+    local playerId = source
+    deferrals.defer()
+    Wait(0) -- Required
+    local identifier
+
+    -- luacheck: ignore
+    if not SetEntityOrphanMode then
+        return deferrals.done(("[ESX] ESX Requires a minimum Artifact version of 10188, Please update your server."))
+    end
+
+    if oneSyncState == "off" or oneSyncState == "legacy" then
+        return deferrals.done(("[ESX] ESX Requires Onesync Infinity to work. This server currently has Onesync set to: %s"):format(oneSyncState))
+    end
+
+    if not Core.DatabaseConnected then
+        return deferrals.done("[ESX] OxMySQL Was Unable To Connect to your database. Please make sure it is turned on and correctly configured in your server.cfg")
+    end
+
+    local success = pcall(function()
+        identifier = ESX.GetIdentifier(playerId)
     end)
-else
-    RegisterNetEvent("esx:onPlayerJoined", function()
-        local _source = source
-        while not next(ESX.Jobs) do
-            Wait(50)
-        end
 
-        if not ESX.Players[_source] then
-            onPlayerJoined(_source)
-        end
-    end)
-end
+    if not success or not identifier then
+        return deferrals.done(missingSteamMessage)
+    end
 
-if not Config.Multichar then
-    AddEventHandler("playerConnecting", function(_, _, deferrals)
-        local playerId = source
-        deferrals.defer()
-        Wait(0) -- Required
-        local identifier
+    local xPlayer = ESX.GetPlayerFromIdentifier(identifier)
 
-        -- luacheck: ignore
-        if not SetEntityOrphanMode then
-            return deferrals.done(("[ESX] ESX Requires a minimum Artifact version of 10188, Please update your server."))
-        end
+    if not xPlayer then
+        return deferrals.done()
+    end
 
-        if oneSyncState == "off" or oneSyncState == "legacy" then
-            return deferrals.done(("[ESX] ESX Requires Onesync Infinity to work. This server currently has Onesync set to: %s"):format(oneSyncState))
-        end
+    if GetPlayerPing(xPlayer.source --[[@as string]]) > 0 then
+        return deferrals.done(
+            ("[ESX] There was an error loading your character!\nError code: identifier-active\n\nThis error is caused by a player on this server who has the same Steam Hex as you have. Make sure you are not playing on the same Steam account.\n\nYour Steam Hex: %s"):format(identifier)
+        )
+    end
 
-        if not Core.DatabaseConnected then
-            return deferrals.done("[ESX] OxMySQL Was Unable To Connect to your database. Please make sure it is turned on and correctly configured in your server.cfg")
-        end
-
-        local success = pcall(function()
-            identifier = ESX.GetIdentifier(playerId)
-        end)
-
-        if not success or not identifier then
-            return deferrals.done(missingSteamMessage)
-        end
-
-        local xPlayer = ESX.GetPlayerFromIdentifier(identifier)
-
-        if not xPlayer then
-            return deferrals.done()
-        end
-
-        if GetPlayerPing(xPlayer.source --[[@as string]]) > 0 then
-            return deferrals.done(
-                ("[ESX] There was an error loading your character!\nError code: identifier-active\n\nThis error is caused by a player on this server who has the same Steam Hex as you have. Make sure you are not playing on the same Steam account.\n\nYour Steam Hex: %s"):format(identifier)
-            )
-        end
-
-        deferrals.update(("[ESX] Cleaning stale player entry..."):format(identifier))
-        onPlayerDropped(xPlayer.source, "esx_stale_player_obj")
-        deferrals.done()
-    end)
-end
+    deferrals.update(("[ESX] Cleaning stale player entry..."):format(identifier))
+    onPlayerDropped(xPlayer.source, "esx_stale_player_obj")
+    deferrals.done()
+end)
 
 function loadESXPlayer(identifier, playerId, isNew)
     MySQL.prepare(loadPlayer, { identifier }, function(result)
@@ -368,8 +337,6 @@ function loadESXPlayer(identifier, playerId, isNew)
 
         if not Config.CustomInventory then
             xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
-        elseif setPlayerInventory then
-            setPlayerInventory(playerId, xPlayer, userData.inventory, isNew)
         end
 
         xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
