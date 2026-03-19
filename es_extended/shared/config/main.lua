@@ -4,7 +4,6 @@ local txAdminLocale = GetConvar("txAdmin-locale", "en")
 local esxLocale = GetConvar("esx:locale", "invalid")
 Config.Locale = (esxLocale ~= "invalid") and esxLocale or (txAdminLocale ~= "custom" and txAdminLocale) or "en"
 
--- For ox inventory, this will automatically be adjusted, do not change! For other inventories, leave as false unless specifically instructed to change.
 Config.CustomInventory = false
 
 Config.Accounts = {
@@ -51,25 +50,43 @@ Config.EnablePaycheck = true -- enable paycheck
 Config.LogPaycheck = false -- Logs paychecks to a nominated Discord channel via webhook (default is false)
 Config.EnableSocietyPayouts = false -- pay from the society account that the player is employed at? Requirement: esx_society
 Config.MaxWeight = 24 -- the max inventory weight without a backpack
+Config.InventoryMode = "limit" -- limit-based inventory mode, weight is ignored for carry validation
+Config.DefaultItemLimit = -1 -- fallback limit when an item definition does not provide one
 Config.PaycheckInterval = 7 * 60000 -- how often to receive paychecks in milliseconds
+Config.SaveInterval = 15000 -- dirty-player autosave flush interval in milliseconds
+Config.InventorySyncInterval = 750 -- inventory delta batch interval in milliseconds
+Config.InventorySyncRateLimit = 500 -- minimum delay between queued sync batches per player in milliseconds
+Config.LoginQueueInterval = 1000 -- login queue processing interval in milliseconds
+Config.LoginQueueBatchSize = 4 -- maximum queued player loads processed per interval
+Config.PaycheckChunkSize = 32 -- players processed per paycheck chunk
+Config.PaycheckChunkDelay = 50 -- wait between paycheck chunks in milliseconds
+Config.PedLoopInterval = 250 -- ped tracking loop interval in milliseconds
+Config.PlayerScopeBucketSize = 128.0 -- server-side player scope spatial bucket size
+Config.PlayerScopeRefreshInterval = 500 -- refresh interval for cached player coords/scope buckets
+Config.PickupBucketSize = 25.0 -- client-side pickup spatial bucket size
+Config.PickupDrawDistance = 5.0 -- 3D text render distance for world pickups
+Config.PickupPromptDistance = 1.0 -- interaction prompt distance for world pickups
+Config.PickupScanInterval = 250 -- pickup proximity refresh interval while nearby pickups are visible
+Config.PickupIdleInterval = 1500 -- pickup proximity refresh interval while no nearby pickups are visible
+Config.EventThrottle = {
+    giveItem = 250,
+    removeInventory = 250,
+    useItem = 150,
+    pickup = 250,
+    updateWeaponAmmo = 200,
+}
 Config.SaveDeathStatus = true -- Save the death status of a player
 Config.EnableDebug = false -- Use Debug options?
+Config.EnablePerformanceDebug = false -- track counters and slow-path warnings
+Config.SlowFunctionWarningMs = 25 -- warn when a hot path exceeds this execution time in debug mode
 
 Config.DefaultJobDuty = true -- A players default duty status when changing jobs
 Config.OffDutyPaycheckMultiplier = 0.5 -- The multiplier for off duty paychecks. 0.5 = 50% of the on duty paycheck
 
-Config.Multichar = GetResourceState("esx_multicharacter") ~= "missing"
-Config.Identity = true -- Select a character identity data before they have loaded in (this happens by default with multichar)
+Config.Multichar = false -- single-character only
+Config.Identity = true -- keep character identity fields for single-character servers if desired
 Config.DistanceGive = 4.0 -- Max distance when giving items, weapons etc.
 
 Config.AdminLogging = false -- Logs the usage of certain commands by those with group.admin ace permissions (default is false)
 
--------------------------------------
--- DO NOT CHANGE BELOW THIS LINE !!!
--------------------------------------
-if GetResourceState("ox_inventory") ~= "missing" then
-    Config.CustomInventory = "ox"
-end
-
 Config.EnableDefaultInventory = Config.CustomInventory == false -- Display the default Inventory ( F2 )
-Config.Identifier = GetConvar("esx:identifier", "license")

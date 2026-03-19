@@ -16,7 +16,7 @@ ESX.Game = {}
 ESX.Game.Utils = {}
 
 CreateThread(function()
-    while not Config.Multichar do
+    while true do
         Wait(100)
 
         if NetworkIsPlayerActive(ESX.playerId) then

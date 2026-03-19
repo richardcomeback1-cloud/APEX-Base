@@ -8,7 +8,6 @@ ESX.OneSync = {}
 local function getNearbyPlayers(source, closest, distance, ignore, routingBucket)
     local result = {}
     local count = 0
-    local playerPed
     local playerCoords
     ignore = ignore or {}
 
@@ -17,17 +16,18 @@ local function getNearbyPlayers(source, closest, distance, ignore, routingBucket
     end
 
     if type(source) == "number" then
-        playerPed = GetPlayerPed(source)
-
         if not source then
             error("Received invalid first argument (source); should be playerId")
         end
 
-        playerCoords = GetEntityCoords(playerPed)
+        local cachedPlayer = Core.PlayerCoords[source]
+        playerCoords = cachedPlayer and cachedPlayer.coords or GetEntityCoords(GetPlayerPed(source))
 
         if not playerCoords then
             error("Received nil value (playerCoords); perhaps source is nil at first place?")
         end
+
+        routingBucket = routingBucket or (cachedPlayer and cachedPlayer.routingBucket) or GetPlayerRoutingBucket(source)
     end
 
     if type(source) == "vector3" then
@@ -38,22 +38,65 @@ local function getNearbyPlayers(source, closest, distance, ignore, routingBucket
         end
     end
 
-    for _, xPlayer in pairs(ESX.Players) do
-        if not ignore[xPlayer.source] and (not routingBucket or GetPlayerRoutingBucket(xPlayer.source) == routingBucket) then
-            local entity = GetPlayerPed(xPlayer.source)
-            local coords = GetEntityCoords(entity)
+    if not next(Core.PlayerScopeBuckets) then
+        for _, xPlayer in pairs(ESX.Players) do
+            if not ignore[xPlayer.source] and (not routingBucket or GetPlayerRoutingBucket(xPlayer.source) == routingBucket) then
+                local entity = GetPlayerPed(xPlayer.source)
+                local coords = GetEntityCoords(entity)
 
-            if not closest then
-                local dist = #(playerCoords - coords)
-                if dist <= distance then
-                    count = count + 1
-                    result[count] = { id = xPlayer.source, ped = NetworkGetNetworkIdFromEntity(entity), coords = coords, dist = dist }
-                end
-            else
-                if xPlayer.source ~= source then
+                if not closest then
+                    local dist = #(playerCoords - coords)
+                    if dist <= distance then
+                        count = count + 1
+                        result[count] = { id = xPlayer.source, ped = NetworkGetNetworkIdFromEntity(entity), coords = coords, dist = dist }
+                    end
+                elseif xPlayer.source ~= source then
                     local dist = #(playerCoords - coords)
                     if dist <= (result.dist or distance) then
                         result = { id = xPlayer.source, ped = NetworkGetNetworkIdFromEntity(entity), coords = coords, dist = dist }
+                    end
+                end
+            end
+        end
+
+        return result
+    end
+
+    local bucketSpan = math.max(1, math.ceil(distance / Config.PlayerScopeBucketSize))
+    local centerX = math.floor(playerCoords.x / Config.PlayerScopeBucketSize)
+    local centerY = math.floor(playerCoords.y / Config.PlayerScopeBucketSize)
+    local routingBuckets = routingBucket ~= nil and { [routingBucket] = true } or Core.PlayerScopeBuckets
+
+    for bucketId in pairs(routingBuckets) do
+        local scopedBuckets = Core.PlayerScopeBuckets[bucketId]
+        if scopedBuckets then
+            for offsetX = -bucketSpan, bucketSpan do
+                for offsetY = -bucketSpan, bucketSpan do
+                    local scopedPlayers = scopedBuckets[("%s:%s"):format(centerX + offsetX, centerY + offsetY)]
+                    if scopedPlayers then
+                        for i = 1, #scopedPlayers do
+                            local playerId = scopedPlayers[i]
+                            if not ignore[playerId] then
+                                local xPlayer = ESX.Players[playerId]
+                                local cachedPlayer = Core.PlayerCoords[playerId]
+
+                                if xPlayer and cachedPlayer then
+                                    local coords = cachedPlayer.coords
+                                    if not closest then
+                                        local dist = #(playerCoords - coords)
+                                        if dist <= distance then
+                                            count = count + 1
+                                            result[count] = { id = playerId, ped = NetworkGetNetworkIdFromEntity(cachedPlayer.ped), coords = coords, dist = dist }
+                                        end
+                                    elseif playerId ~= source then
+                                        local dist = #(playerCoords - coords)
+                                        if dist <= (result.dist or distance) then
+                                            result = { id = playerId, ped = NetworkGetNetworkIdFromEntity(cachedPlayer.ped), coords = coords, dist = dist }
+                                        end
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end

@@ -25,15 +25,12 @@ server_scripts {
 	'server/modules/callback.lua',
 	'server/classes/player.lua',
 	'server/classes/vehicle.lua',
-	'server/classes/overrides/*.lua',
 	'server/functions.lua',
 	'server/modules/onesync.lua',
 	'server/modules/paycheck.lua',
 
 	'server/main.lua',
 	'server/modules/commands.lua',
-
-	'server/bridge/**/*.lua',
 	'server/modules/npwd.lua',
 	'server/modules/createJob.lua',
 	'server/migration/**/main.lua',

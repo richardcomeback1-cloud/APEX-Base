@@ -1,4 +1,119 @@
 local pickups = {}
+local inventoryIndex = {}
+local pickupBuckets = {}
+local pickupRenderState = {
+    visible = {},
+    promptPickupId = nil,
+}
+
+local function getPickupBucketKey(coords)
+    return ("%s:%s"):format(
+        math.floor(coords.x / Config.PickupBucketSize),
+        math.floor(coords.y / Config.PickupBucketSize)
+    )
+end
+
+local function addPickupToBucket(pickupId, pickup)
+    local bucketKey = getPickupBucketKey(pickup.coords)
+    pickup.bucketKey = bucketKey
+    pickupBuckets[bucketKey] = pickupBuckets[bucketKey] or {}
+    pickupBuckets[bucketKey][pickupId] = true
+end
+
+local function removePickupFromBucket(pickupId, pickup)
+    if not pickup or not pickup.bucketKey or not pickupBuckets[pickup.bucketKey] then
+        return
+    end
+
+    pickupBuckets[pickup.bucketKey][pickupId] = nil
+    if not next(pickupBuckets[pickup.bucketKey]) then
+        pickupBuckets[pickup.bucketKey] = nil
+    end
+end
+
+local function getNearbyPickupIds(coords)
+    local nearbyPickupIds = {}
+    local centerX = math.floor(coords.x / Config.PickupBucketSize)
+    local centerY = math.floor(coords.y / Config.PickupBucketSize)
+
+    for offsetX = -1, 1 do
+        for offsetY = -1, 1 do
+            local bucket = pickupBuckets[("%s:%s"):format(centerX + offsetX, centerY + offsetY)]
+            if bucket then
+                for pickupId in pairs(bucket) do
+                    nearbyPickupIds[#nearbyPickupIds + 1] = pickupId
+                end
+            end
+        end
+    end
+
+    return nearbyPickupIds
+end
+
+local function clearPickupRenderState()
+    for pickupId, pickup in pairs(pickups) do
+        if pickup.inRange then
+            pickup.inRange = false
+        end
+    end
+
+    pickupRenderState.visible = {}
+    pickupRenderState.promptPickupId = nil
+end
+
+local function refreshPickupRenderState()
+    local ped = ESX.PlayerData.ped
+    if not ped or ped == 0 or not ESX.PlayerLoaded then
+        clearPickupRenderState()
+        return false
+    end
+
+    local playerCoords = GetEntityCoords(ped)
+    local nearbyPickupIds = getNearbyPickupIds(playerCoords)
+    local visiblePickups = {}
+    local promptPickupId
+    local closestPromptDistance = Config.PickupPromptDistance
+
+    for i = 1, #nearbyPickupIds do
+        local pickupId = nearbyPickupIds[i]
+        local pickup = pickups[pickupId]
+
+        if pickup then
+            local distance = #(playerCoords - pickup.coords)
+
+            if distance < Config.PickupDrawDistance then
+                visiblePickups[#visiblePickups + 1] = {
+                    id = pickupId,
+                    distance = distance,
+                }
+
+                if distance < closestPromptDistance then
+                    closestPromptDistance = distance
+                    promptPickupId = pickupId
+                end
+            elseif pickup.inRange then
+                pickup.inRange = false
+            end
+        end
+    end
+
+    pickupRenderState.visible = visiblePickups
+    pickupRenderState.promptPickupId = promptPickupId
+
+    return #visiblePickups > 0
+end
+
+local function rebuildInventoryIndex()
+    inventoryIndex = {}
+
+    if not ESX.PlayerData.inventory then
+        return
+    end
+
+    for index = 1, #ESX.PlayerData.inventory do
+        inventoryIndex[ESX.PlayerData.inventory[index].name] = index
+    end
+end
 
 RegisterNetEvent("esx:requestModel", function(model)
     ESX.Streaming.RequestModel(model)
@@ -6,17 +121,16 @@ end)
 
 RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
     ESX.PlayerData = xPlayer
+    rebuildInventoryIndex()
 
-    if not Config.Multichar then
-        ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
-            TriggerEvent("esx:onPlayerSpawn")
-            TriggerEvent("esx:restoreLoadout")
-            TriggerServerEvent("esx:onPlayerSpawn")
-            TriggerEvent("esx:loadingScreenOff")
-            ShutdownLoadingScreen()
-            ShutdownLoadingScreenNui()
-        end)
-    end
+    ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
+        TriggerEvent("esx:onPlayerSpawn")
+        TriggerEvent("esx:restoreLoadout")
+        TriggerServerEvent("esx:onPlayerSpawn")
+        TriggerEvent("esx:loadingScreenOff")
+        ShutdownLoadingScreen()
+        ShutdownLoadingScreenNui()
+    end)
 
     while not DoesEntityExist(ESX.PlayerData.ped) do
         Wait(20)
@@ -33,9 +147,7 @@ RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
 
     ClearPedTasksImmediately(ESX.PlayerData.ped)
 
-    if not Config.Multichar then
-        Core.FreezePlayer(false)
-    end
+    Core.FreezePlayer(false)
 
     if IsScreenFadedOut() then
         DoScreenFadeIn(500)
@@ -51,6 +163,7 @@ local isFirstSpawn = true
 ESX.SecureNetEvent("esx:onPlayerLogout", function()
     ESX.PlayerLoaded = false
     isFirstSpawn = true
+    clearPickupRenderState()
 end)
 
 ESX.SecureNetEvent("esx:setMaxWeight", function(newMaxWeight)
@@ -59,6 +172,7 @@ end)
 
 ESX.SecureNetEvent("esx:setInventory", function(newInventory)
     ESX.SetPlayerData("inventory", newInventory)
+    rebuildInventoryIndex()
 end)
 
 local function onPlayerSpawn()
@@ -168,13 +282,30 @@ ESX.SecureNetEvent("esx:setAccountMoney", function(account)
 end)
 
 if not Config.CustomInventory then
-    ESX.SecureNetEvent("esx:addInventoryItem", function(item, count, showNotification)
-        for k, v in ipairs(ESX.PlayerData.inventory) do
-            if v.name == item then
-                ESX.UI.ShowInventoryItemNotification(true, v.label, count - v.count)
-                ESX.PlayerData.inventory[k].count = count
-                break
+    ESX.SecureNetEvent("esx:updateInventory", function(updates)
+        for i = 1, #updates do
+            local update = updates[i]
+            local index = inventoryIndex[update.name]
+
+            if index then
+                local inventoryItem = ESX.PlayerData.inventory[index]
+                if update.delta > 0 then
+                    ESX.UI.ShowInventoryItemNotification(true, inventoryItem.label, update.delta)
+                elseif update.delta < 0 then
+                    ESX.UI.ShowInventoryItemNotification(false, inventoryItem.label, -update.delta)
+                end
+
+                inventoryItem.count = update.count
             end
+        end
+    end)
+
+    ESX.SecureNetEvent("esx:addInventoryItem", function(item, count, showNotification)
+        local index = inventoryIndex[item]
+        if index then
+            local inventoryItem = ESX.PlayerData.inventory[index]
+            ESX.UI.ShowInventoryItemNotification(true, inventoryItem.label, count - inventoryItem.count)
+            inventoryItem.count = count
         end
 
         if showNotification then
@@ -183,12 +314,11 @@ if not Config.CustomInventory then
     end)
 
     ESX.SecureNetEvent("esx:removeInventoryItem", function(item, count, showNotification)
-        for i = 1, #ESX.PlayerData.inventory do
-            if ESX.PlayerData.inventory[i].name == item then
-                ESX.UI.ShowInventoryItemNotification(false, ESX.PlayerData.inventory[i].label, ESX.PlayerData.inventory[i].count - count)
-                ESX.PlayerData.inventory[i].count = count
-                break
-            end
+        local index = inventoryIndex[item]
+        if index then
+            local inventoryItem = ESX.PlayerData.inventory[index]
+            ESX.UI.ShowInventoryItemNotification(false, inventoryItem.label, inventoryItem.count - count)
+            inventoryItem.count = count
         end
 
         if showNotification then
@@ -264,6 +394,7 @@ if not Config.CustomInventory then
                 inRange = false,
                 coords = coords,
             }
+            addPickupToBucket(pickupId, pickups[pickupId])
         end
 
         if itemType == "item_weapon" then
@@ -303,8 +434,12 @@ end)
 if not Config.CustomInventory then
     ESX.SecureNetEvent("esx:removePickup", function(pickupId)
         if pickups[pickupId] and pickups[pickupId].obj then
+            removePickupFromBucket(pickupId, pickups[pickupId])
             ESX.Game.DeleteObject(pickups[pickupId].obj)
             pickups[pickupId] = nil
+            if pickupRenderState.promptPickupId == pickupId then
+                pickupRenderState.promptPickupId = nil
+            end
         end
     end)
 end
@@ -370,43 +505,67 @@ end
 if not Config.CustomInventory then
     CreateThread(function()
         while true do
-            local Sleep = 1500
-            local playerCoords = GetEntityCoords(ESX.PlayerData.ped)
-            local _, closestDistance = ESX.Game.GetClosestPlayer(playerCoords)
+            local hasVisiblePickups = refreshPickupRenderState()
+            Wait(hasVisiblePickups and Config.PickupScanInterval or Config.PickupIdleInterval)
+        end
+    end)
 
-            for pickupId, pickup in pairs(pickups) do
-                local distance = #(playerCoords - pickup.coords)
+    CreateThread(function()
+        while true do
+            if not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+                clearPickupRenderState()
+                Wait(Config.PickupIdleInterval)
+                goto continue
+            end
 
-                if distance < 5 then
-                    Sleep = 0
+            local visiblePickups = pickupRenderState.visible
+            if #visiblePickups == 0 then
+                Wait(Config.PickupIdleInterval)
+                goto continue
+            end
+
+            local promptPickupId = pickupRenderState.promptPickupId
+            local ped = ESX.PlayerData.ped
+
+            for i = 1, #visiblePickups do
+                local pickupState = visiblePickups[i]
+                local pickup = pickups[pickupState.id]
+
+                if pickup then
                     local label = pickup.label
 
-                    if distance < 1 then
-                        if IsControlJustReleased(0, 38) then
-                            if IsPedOnFoot(ESX.PlayerData.ped) and (closestDistance == -1 or closestDistance > 3) and not pickup.inRange then
-                                pickup.inRange = true
-
-                                local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
-                                ESX.Streaming.RequestAnimDict(dict)
-                                TaskPlayAnim(ESX.PlayerData.ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
-                                RemoveAnimDict(dict)
-                                Wait(1000)
-
-                                TriggerServerEvent("esx:onPickup", pickupId)
-                                PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
-                            end
-                        end
-
+                    if pickupState.id == promptPickupId then
                         label = ("%s~n~%s"):format(label, TranslateCap("threw_pickup_prompt"))
+                    elseif pickup.inRange then
+                        pickup.inRange = false
                     end
 
                     local textCoords = pickup.coords + vector3(0.0, 0.0, 0.25)
                     ESX.Game.Utils.DrawText3D(textCoords, label, 1.2, 1)
-                elseif pickup.inRange then
-                    pickup.inRange = false
                 end
             end
-            Wait(Sleep)
+
+            if promptPickupId and IsControlJustReleased(0, 38) then
+                local pickup = pickups[promptPickupId]
+                if pickup and IsPedOnFoot(ped) and not pickup.inRange then
+                    local _, closestDistance = ESX.Game.GetClosestPlayer(GetEntityCoords(ped))
+                    if closestDistance == -1 or closestDistance > 3 then
+                        pickup.inRange = true
+
+                        local dict, anim = "weapons@first_person@aim_rng@generic@projectile@sticky_bomb@", "plant_floor"
+                        ESX.Streaming.RequestAnimDict(dict)
+                        TaskPlayAnim(ped, dict, anim, 8.0, 1.0, 1000, 16, 0.0, false, false, false)
+                        RemoveAnimDict(dict)
+                        Wait(1000)
+
+                        TriggerServerEvent("esx:onPickup", promptPickupId)
+                        PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
+                    end
+                end
+            end
+
+            Wait(0)
+            ::continue::
         end
     end)
 end

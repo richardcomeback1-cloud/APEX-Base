@@ -42,6 +42,9 @@ function Adjustments:HealthRegeneration()
 end
 
 function Adjustments:AmmoAndVehicleRewards()
+end
+
+function Adjustments:FrameLoop()
     CreateThread(function()
         while true do
             if Config.DisableDisplayAmmo then
@@ -51,6 +54,13 @@ function Adjustments:AmmoAndVehicleRewards()
             if Config.DisableVehicleRewards then
                 DisablePlayerVehicleRewards(ESX.playerId)
             end
+
+            SetPedDensityMultiplierThisFrame(Config.Multipliers.pedDensity)
+            SetScenarioPedDensityMultiplierThisFrame(Config.Multipliers.scenarioPedDensityInterior, Config.Multipliers.scenarioPedDensityExterior)
+            SetAmbientVehicleRangeMultiplierThisFrame(Config.Multipliers.ambientVehicleRange)
+            SetParkedVehicleDensityMultiplierThisFrame(Config.Multipliers.parkedVehicleDensity)
+            SetRandomVehicleDensityMultiplierThisFrame(Config.Multipliers.randomVehicleDensity)
+            SetVehicleDensityMultiplierThisFrame(Config.Multipliers.vehicleDensity)
 
             Wait(0)
         end
@@ -221,20 +231,6 @@ function Adjustments:DisableRadio()
     end
 end
 
-function Adjustments:Multipliers()
-    CreateThread(function()
-        while true do
-            SetPedDensityMultiplierThisFrame(Config.Multipliers.pedDensity)
-            SetScenarioPedDensityMultiplierThisFrame(Config.Multipliers.scenarioPedDensityInterior, Config.Multipliers.scenarioPedDensityExterior)
-            SetAmbientVehicleRangeMultiplierThisFrame(Config.Multipliers.ambientVehicleRange)
-            SetParkedVehicleDensityMultiplierThisFrame(Config.Multipliers.parkedVehicleDensity)
-            SetRandomVehicleDensityMultiplierThisFrame(Config.Multipliers.randomVehicleDensity)
-            SetVehicleDensityMultiplierThisFrame(Config.Multipliers.vehicleDensity)
-            Wait(0)
-        end
-    end)
-end
-
 function Adjustments:Load()
     self:RemoveHudComponents()
     self:DisableAimAssist()
@@ -249,5 +245,5 @@ function Adjustments:Load()
     self:DiscordPresence()
     self:WantedLevel()
     self:DisableRadio()
-    self:Multipliers()
+    self:FrameLoop()
 end

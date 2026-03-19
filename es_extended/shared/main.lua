@@ -9,6 +9,3 @@ AddEventHandler("esx:getSharedObject", function(cb)
         cb(ESX)
     end
 end)
-
--- backwards compatibility (DO NOT TOUCH !)
-Config.OxInventory = Config.CustomInventory == "ox"

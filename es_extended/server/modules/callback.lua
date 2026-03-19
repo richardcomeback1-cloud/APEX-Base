@@ -37,9 +37,12 @@ end
 function Callbacks:Trigger(player, event, cb, invoker, ...)
     self.requests[self.id] = {
         await = type(cb) == "boolean",
-        cb = cb or promise:new()
+        cb = cb or promise:new(),
+        startedAt = GetGameTimer(),
+        event = event,
     }
     local table = self.requests[self.id]
+    Core.DebugCounter("server_callback_request_count")
 
     TriggerClientEvent("esx:triggerClientCallback", player, event, self.id, invoker, ...)
 
@@ -71,6 +74,7 @@ function Callbacks:RecieveClient(requestId, invoker, ...)
     end
 
     local callback = self.requests[self.currentId]
+    Core.DebugDuration(("server_callback:%s"):format(callback.event or "unknown"), callback.startedAt or GetGameTimer())
 
     self.requests[requestId] = nil
     if callback.await then

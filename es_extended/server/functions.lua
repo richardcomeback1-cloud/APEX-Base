@@ -198,89 +198,139 @@ end
 
 local function updateHealthAndArmorInMetadata(xPlayer)
     local ped = GetPlayerPed(xPlayer.source)
-    xPlayer.setMeta("health", GetEntityHealth(ped))
-    xPlayer.setMeta("armor", GetPedArmour(ped))
-    xPlayer.setMeta("lastPlaytime", xPlayer.getPlayTime())
+    if not ped or ped == 0 then
+        return
+    end
+
+    xPlayer.state.metadata.health = GetEntityHealth(ped)
+    xPlayer.state.metadata.armor = GetPedArmour(ped)
+    xPlayer.state.metadata.lastPlaytime = xPlayer.getPlayTime()
+    xPlayer.metadata = xPlayer.state.metadata
+end
+
+local savePlayerQuery = "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?"
+
+local function serializeAccountState(xPlayer)
+    local accounts = {}
+
+    for accountName, account in pairs(xPlayer.state.money) do
+        accounts[accountName] = account.money
+    end
+
+    return accounts
+end
+
+local function buildPlayerSaveQuery(xPlayer)
+    updateHealthAndArmorInMetadata(xPlayer)
+
+    return {
+        query = savePlayerQuery,
+        values = {
+            json.encode(serializeAccountState(xPlayer)),
+            xPlayer.state.job.name,
+            xPlayer.state.job.grade,
+            xPlayer.group,
+            json.encode(xPlayer.getCoords(false, true)),
+            json.encode(xPlayer.getInventory(true)),
+            json.encode(xPlayer.getLoadout(true)),
+            json.encode(xPlayer.state.metadata),
+            xPlayer.identifier,
+        }
+    }
+end
+
+local function flushPlayerQueries(queries, onComplete)
+    if #queries == 0 then
+        if onComplete then
+            onComplete(true)
+        end
+        return
+    end
+
+    local startedAt = GetGameTimer()
+    Core.DebugCounter("db_flush_requests")
+
+    MySQL.transaction(queries, function(success)
+        Core.DebugDuration("db_flush", startedAt)
+        if onComplete then
+            onComplete(success == true)
+        end
+    end)
+end
+
+local function hasDirtyFlags(xPlayer)
+    for _, dirty in pairs(xPlayer.dirtyFlags) do
+        if dirty then
+            return true
+        end
+    end
+
+    return false
 end
 
 ---@param xPlayer table
 ---@param cb? function
+---@param immediate? boolean
 ---@return nil
-function Core.SavePlayer(xPlayer, cb)
+function Core.SavePlayer(xPlayer, cb, immediate)
     if not xPlayer.spawned then
         return cb and cb()
     end
 
-    updateHealthAndArmorInMetadata(xPlayer)
-    local parameters <const> = {
-        json.encode(xPlayer.getAccounts(true)),
-        xPlayer.job.name,
-        xPlayer.job.grade,
-        xPlayer.group,
-        json.encode(xPlayer.getCoords(false, true)),
-        json.encode(xPlayer.getInventory(true)),
-        json.encode(xPlayer.getLoadout(true)),
-        json.encode(xPlayer.getMeta()),
-        xPlayer.identifier,
-    }
+    if not immediate then
+        Core.WriteQueue.players[xPlayer.source] = xPlayer
+        return cb and cb()
+    end
 
-    MySQL.prepare(
-        "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?",
-        parameters,
-        function(affectedRows)
-            if affectedRows == 1 then
-                print(('[^2INFO^7] Saved player ^5"%s^7"'):format(xPlayer.name))
-                TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
-            end
-            if cb then
-                cb()
-            end
+    flushPlayerQueries({ buildPlayerSaveQuery(xPlayer) }, function(success)
+        if success then
+            Core.ClearPlayerDirtyFlags(xPlayer)
+            print(('[^2INFO^7] Saved player ^5"%s^7"'):format(xPlayer.name))
+            TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
         end
-    )
+
+        if cb then
+            cb(success)
+        end
+    end)
 end
 
 ---@param cb? function
 ---@return nil
 function Core.SavePlayers(cb)
-    local xPlayers <const> = ESX.Players
-    if not next(xPlayers) then
-        return
-    end
-
-    local startTime <const> = os.time()
     local parameters = {}
+    local savedPlayers = {}
 
-    for _, xPlayer in pairs(ESX.Players) do
-        updateHealthAndArmorInMetadata(xPlayer)
-        parameters[#parameters + 1] = {
-            json.encode(xPlayer.getAccounts(true)),
-            xPlayer.job.name,
-            xPlayer.job.grade,
-            xPlayer.group,
-            json.encode(xPlayer.getCoords(false, true)),
-            json.encode(xPlayer.getInventory(true)),
-            json.encode(xPlayer.getLoadout(true)),
-            json.encode(xPlayer.getMeta()),
-            xPlayer.identifier,
-        }
+    for source, xPlayer in pairs(Core.WriteQueue.players) do
+        if xPlayer and xPlayer.spawned and hasDirtyFlags(xPlayer) then
+            parameters[#parameters + 1] = buildPlayerSaveQuery(xPlayer)
+            savedPlayers[#savedPlayers + 1] = source
+        else
+            Core.WriteQueue.players[source] = nil
+        end
     end
 
-    MySQL.prepare(
-        "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?",
-        parameters,
-        function(results)
-            if not results then
-                return
-            end
+    if #parameters == 0 then
+        return cb and cb()
+    end
 
-            if type(cb) == "function" then
-                return cb()
+    flushPlayerQueries(parameters, function(success)
+        if success then
+            for i = 1, #savedPlayers do
+                local xPlayer = ESX.Players[savedPlayers[i]]
+                if xPlayer then
+                    Core.ClearPlayerDirtyFlags(xPlayer)
+                    TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
+                end
             end
-
-            print(("[^2INFO^7] Saved ^5%s^7 %s over ^5%s^7 ms"):format(#parameters,
-                #parameters > 1 and "players" or "player", ESX.Math.Round((os.time() - startTime) / 1000000, 2)))
         end
-    )
+
+        if type(cb) == "function" then
+            return cb(success)
+        end
+
+        print(("[^2INFO^7] Saved ^5%s^7 %s"):format(#parameters, #parameters > 1 and "players" or "player"))
+    end)
 end
 
 ESX.GetPlayers = GetPlayers
@@ -393,21 +443,22 @@ function ESX.IsPlayerLoaded(source)
 end
 
 ---@param playerId number | string
----@return string, number
+---@return string?
 function ESX.GetIdentifier(playerId)
     local fxDk = GetConvarInt("sv_fxdkMode", 0)
     if fxDk == 1 then
-        return "ESX-DEBUG-LICENCE", 0
+        return "steam:esx-debug"
     end
 
     playerId = tostring(playerId)
+    local identifiers = GetPlayerIdentifiers(playerId)
 
-    local identifierType = Config.Identifier
-    local identifier = GetPlayerIdentifierByType(playerId, identifierType)
-
-    assert(identifier, ("[ESX] GetIdentifier failed: no identifier found for playerId %s with type '%s'"):format(playerId, identifierType))
-
-    return identifier:gsub(("%s:"):format(identifierType), "")
+    for i = 1, #identifiers do
+        local identifier = string.lower(identifiers[i])
+        if identifier:sub(1, 6) == "steam:" then
+            return identifier
+        end
+    end
 end
 
 ---@param model string|number
@@ -690,22 +741,18 @@ if not Config.CustomInventory then
                 end
             end
 
-            xPlayer.inventory = {}
-            local playerInvIndex = 1
             for itemName, itemData in pairs(ESX.Items) do
-                xPlayer.inventory[playerInvIndex] = {
-                    name = itemName,
-                    count = minimalInv[itemName] or 0,
-                    label = itemData.label,
-                    weight = itemData.weight,
-                    usable = Core.UsableItemsCallbacks[itemName] ~= nil,
-                    rare = itemData.rare,
-                    canRemove = itemData.canRemove,
-                }
-                playerInvIndex += 1
+                local inventoryItem = xPlayer.getInventoryItem(itemName)
+                inventoryItem.label = itemData.label
+                inventoryItem.weight = itemData.weight or 0
+                inventoryItem.limit = itemData.limit or Config.DefaultItemLimit
+                inventoryItem.usable = Core.UsableItemsCallbacks[itemName] ~= nil
+                inventoryItem.rare = itemData.rare
+                inventoryItem.canRemove = itemData.canRemove
             end
 
-            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.inventory)
+            xPlayer.inventoryArrayDirty = true
+            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.getInventory())
         end
     end
 
@@ -717,8 +764,13 @@ if not Config.CustomInventory then
         local itemCount = #items
         for i = 1, itemCount do
             local item = items[i]
-            ESX.Items[item.name] = { label = item.label, weight = item.weight, rare = item.rare, canRemove = item
-            .can_remove }
+            ESX.Items[item.name] = {
+                label = item.label,
+                weight = item.weight,
+                limit = item.limit or Config.DefaultItemLimit,
+                rare = item.rare,
+                canRemove = item.can_remove
+            }
         end
         refreshPlayerInventories()
 
@@ -823,56 +875,6 @@ function Core.IsPlayerAdmin(playerSrc)
 
     local xPlayer = ESX.GetPlayerFromId(playerSrc)
     return xPlayer and Config.AdminGroups[xPlayer.getGroup()] or false
-end
-
--- Generates a unique 9-digit SSN in dashed format (XXX-XX-XXXX).
----@param skipUniqueCheck boolean?
----@return string
-function Core.generateSSN(skipUniqueCheck)
-    local reservedSSNs = {
-        ["078-05-1120"] = true,
-        ["219-09-9999"] = true,
-        ["123-45-6789"] = true
-    }
-
-    while true do
-        -- Generate the first part (area number)
-        local area = math.random(1, 899)
-
-        -- 666 is never assigned
-        if area == 666 then
-            goto continue
-        end
-
-        -- Generate the second part (group number)
-        local group = math.random(1, 99)
-
-        -- Generate the last part (serial number)
-        local serial = math.random(1, 9999)
-
-        -- Skip reserved SSN range (987-65-4320..4329)
-        if area == 987 and group == 65 and serial >= 4320 and serial <= 4329 then
-            goto continue
-        end
-
-        local candidate = string.format("%03d-%02d-%04d", area, group, serial)
-
-        if reservedSSNs[candidate] then
-            goto continue
-        end
-
-        if skipUniqueCheck then
-            return candidate
-        end
-
-        local exists = MySQL.scalar.await("SELECT 1 FROM `users` WHERE `ssn` = ? LIMIT 1", { candidate })
-
-        if not exists then
-            return candidate
-        end
-
-        ::continue::
-    end
 end
 
 ---@param owner string
