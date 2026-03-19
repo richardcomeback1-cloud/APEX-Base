@@ -148,16 +148,78 @@
 ---@param coords vector4|{x: number, y: number, z: number, heading: number}
 ---@param metadata table
 ---@return xPlayer
+local stringLower = string.lower
+
+local function getItemLimit(itemName)
+    local item = ESX.Items[itemName]
+    if not item then
+        return Config.DefaultItemLimit
+    end
+
+    return item.limit or Config.DefaultItemLimit
+end
+
+local function normalizeInventoryEntry(name, count, metadata)
+    local itemData = ESX.Items[name]
+    local usable = Core.UsableItemsCallbacks[name] ~= nil
+
+    return {
+        name = name,
+        count = count or 0,
+        label = itemData and itemData.label or name,
+        limit = itemData and (itemData.limit or Config.DefaultItemLimit) or 0,
+        metadata = metadata or {},
+        weight = itemData and itemData.weight or 0,
+        usable = usable,
+        rare = itemData and itemData.rare or false,
+        canRemove = itemData and itemData.canRemove ~= false or false,
+    }
+end
+
+local function normalizeInventoryTable(rawInventory)
+    local counts, metadata = {}, {}
+
+    if type(rawInventory) ~= "table" then
+        return counts, metadata
+    end
+
+    if #rawInventory > 0 then
+        for i = 1, #rawInventory do
+            local entry = rawInventory[i]
+            if entry and entry.name then
+                counts[entry.name] = entry.count or 0
+                metadata[entry.name] = entry.metadata or {}
+            end
+        end
+
+        return counts, metadata
+    end
+
+    for itemName, value in pairs(rawInventory) do
+        if type(value) == "table" then
+            counts[itemName] = value.count or value.amount or 0
+            metadata[itemName] = value.metadata or {}
+        else
+            counts[itemName] = value or 0
+        end
+    end
+
+    return counts, metadata
+end
+
 function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, inventory, weight, job, loadout, name, coords, metadata)
     ---@diagnostic disable-next-line: missing-fields
     local self = {} ---@type xPlayer
 
     self.accounts = accounts
+    self.accountsByName = {}
     self.coords = coords
     self.group = group
     self.identifier = identifier
     self.ssn = ssn
-    self.inventory = inventory
+    self.inventory = {}
+    self.inventoryList = {}
+    self.inventoryArrayDirty = false
     self.job = job
     self.loadout = loadout
     self.name = name
@@ -193,6 +255,23 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
     stateBag:set("group", self.group, true)
     stateBag:set("name", self.name, true)
 
+    for i = 1, #self.accounts do
+        self.accountsByName[stringLower(self.accounts[i].name)] = self.accounts[i]
+    end
+
+    local inventoryCounts, inventoryMetadata = normalizeInventoryTable(inventory)
+    for itemName, itemData in pairs(ESX.Items) do
+        local normalizedItem = normalizeInventoryEntry(itemName, inventoryCounts[itemName] or 0, inventoryMetadata[itemName])
+        self.inventory[itemName] = normalizedItem
+        self.inventoryList[#self.inventoryList + 1] = normalizedItem
+    end
+
+    table.sort(self.inventoryList, function(a, b)
+        return a.label < b.label
+    end)
+
+    Core.BindPlayerCache(self)
+
     function self.triggerEvent(eventName, ...)
         assert(type(eventName) == "string", "eventName should be string!")
         TriggerClientEvent(eventName, self.source, ...)
@@ -215,6 +294,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
         SetEntityCoords(ped, coordinates.x, coordinates.y, coordinates.z, false, false, false, false)
         SetEntityHeading(ped, coordinates.w or coordinates.heading or 0.0)
+        Core.MarkPlayerDirty(self, "position")
     end
 
     function self.getCoords(vector, heading)
@@ -278,6 +358,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
         ExecuteCommand(("remove_principal identifier.%s group.%s"):format(self.license, self.group))
 
         self.group = newGroup
+        Core.MarkPlayerDirty(self, "group")
 
         TriggerEvent("esx:setGroup", self.source, self.group, lastGroup)
         self.triggerEvent("esx:setGroup", self.group, lastGroup)
@@ -315,30 +396,34 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
     end
 
     function self.getAccount(account)
-        account = string.lower(account)
-        for i = 1, #self.accounts do
-            local accountName = string.lower(self.accounts[i].name)
-            if accountName == account then
-                return self.accounts[i]
-            end
+        if type(account) ~= "string" then
+            return nil
         end
-        return nil
+
+        return self.accountsByName[stringLower(account)]
     end
 
     function self.getInventory(minimal)
         if minimal then
             local minimalInventory = {}
 
-            for _, v in ipairs(self.inventory) do
+            for itemName, v in pairs(self.inventory) do
                 if v.count > 0 then
-                    minimalInventory[v.name] = v.count
+                    if next(v.metadata) then
+                        minimalInventory[itemName] = {
+                            count = v.count,
+                            metadata = v.metadata,
+                        }
+                    else
+                        minimalInventory[itemName] = v.count
+                    end
                 end
             end
 
             return minimalInventory
         end
 
-        return self.inventory
+        return self.inventoryList
     end
 
     function self.getJob()
@@ -381,12 +466,13 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
     function self.setName(newName)
         self.name = newName
+        Core.MarkPlayerDirty(self, "name")
         Player(self.source).state:set("name", self.name, true)
     end
 
     function self.setAccountMoney(accountName, money, reason)
         reason = reason or "unknown"
-        if not tonumber(money) then
+        if type(money) ~= "number" then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
@@ -395,7 +481,12 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
             if account then
                 money = account.round and ESX.Math.Round(money) or money
-                self.accounts[account.index].money = money
+                account.money = money
+                if account.name == "money" then
+                    self.cache.money = money
+                end
+                Core.MarkPlayerDirty(self, "accounts")
+                Core.DebugCounter("account_mutations")
 
                 self.triggerEvent("esx:setAccountMoney", account)
                 TriggerEvent("esx:setAccountMoney", self.source, accountName, money, reason)
@@ -409,7 +500,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
     function self.addAccountMoney(accountName, money, reason)
         reason = reason or "Unknown"
-        if not tonumber(money) then
+        if type(money) ~= "number" then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
@@ -417,7 +508,12 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
             local account = self.getAccount(accountName)
             if account then
                 money = account.round and ESX.Math.Round(money) or money
-                self.accounts[account.index].money = self.accounts[account.index].money + money
+                account.money = account.money + money
+                if account.name == "money" then
+                    self.cache.money = account.money
+                end
+                Core.MarkPlayerDirty(self, "accounts")
+                Core.DebugCounter("account_mutations")
 
                 self.triggerEvent("esx:setAccountMoney", account)
                 TriggerEvent("esx:addAccountMoney", self.source, accountName, money, reason)
@@ -431,7 +527,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
     function self.removeAccountMoney(accountName, money, reason)
         reason = reason or "Unknown"
-        if not tonumber(money) then
+        if type(money) ~= "number" then
             error(("Tried To Set Account ^5%s^1 For Player ^5%s^1 To An Invalid Number -> ^5%s^1"):format(accountName, self.playerId, money))
             return
         end
@@ -440,11 +536,16 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
             if account then
                 money = account.round and ESX.Math.Round(money) or money
-                if self.accounts[account.index].money - money > self.accounts[account.index].money then
+                if account.money < money then
                     error(("Tried To Underflow Account ^5%s^1 For Player ^5%s^1!"):format(accountName, self.playerId))
                     return
                 end
-                self.accounts[account.index].money = self.accounts[account.index].money - money
+                account.money = account.money - money
+                if account.name == "money" then
+                    self.cache.money = account.money
+                end
+                Core.MarkPlayerDirty(self, "accounts")
+                Core.DebugCounter("account_mutations")
 
                 self.triggerEvent("esx:setAccountMoney", account)
                 TriggerEvent("esx:removeAccountMoney", self.source, accountName, money, reason)
@@ -457,60 +558,98 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
     end
 
     function self.getInventoryItem(itemName)
-        for _, v in ipairs(self.inventory) do
-            if v.name == itemName then
-                return v
-            end
+        local inventoryItem = self.inventory[itemName]
+        if inventoryItem then
+            return inventoryItem
         end
-        return nil
+
+        inventoryItem = normalizeInventoryEntry(itemName, 0, {})
+        if ESX.Items[itemName] then
+            self.inventory[itemName] = inventoryItem
+            self.inventoryList[#self.inventoryList + 1] = inventoryItem
+            self.inventoryArrayDirty = true
+        end
+
+        return inventoryItem
     end
 
     function self.addInventoryItem(itemName, count)
+        local startedAt = GetGameTimer()
         local item = self.getInventoryItem(itemName)
+        local itemDefinition = ESX.Items[itemName]
 
-        if item then
-            count = ESX.Math.Round(count)
-            item.count = item.count + count
-            self.weight = self.weight + (item.weight * count)
-
-            TriggerEvent("esx:onAddInventoryItem", self.source, item.name, item.count)
-            self.triggerEvent("esx:addInventoryItem", item.name, item.count)
+        if not itemDefinition then
+            return error(("Tried To Add Invalid Item ^5%s^1 For Player ^5%s^1!"):format(itemName, self.playerId))
         end
+
+        count = ESX.Math.Round(count)
+        if count <= 0 then
+            return error(("Player ID:^5%s Tried add an invalid count -> %s of %s"):format(self.playerId, count, itemName))
+        end
+
+        local limit = item.limit
+        if limit ~= -1 and (item.count + count) > limit then
+            return false
+        end
+
+        item.count = item.count + count
+        self.weight = self.weight + (item.weight * count)
+
+        Core.MarkPlayerDirty(self, "inventory")
+        Core.QueueInventorySync(self, item.name, item.count, count, item.label)
+        Core.DebugCounter("inventory_mutations")
+
+        TriggerEvent("esx:onAddInventoryItem", self.source, item.name, item.count)
+        Core.DebugDuration("xPlayer.addInventoryItem", startedAt)
+        return true
     end
 
     function self.removeInventoryItem(itemName, count)
+        local startedAt = GetGameTimer()
         local item = self.getInventoryItem(itemName)
 
-        if item then
-            count = ESX.Math.Round(count)
-            if count > 0 then
-                local newCount = item.count - count
-
-                if newCount >= 0 then
-                    item.count = newCount
-                    self.weight = self.weight - (item.weight * count)
-
-                    TriggerEvent("esx:onRemoveInventoryItem", self.source, item.name, item.count)
-                    self.triggerEvent("esx:removeInventoryItem", item.name, item.count)
-                end
-            else
-                error(("Player ID:^5%s Tried remove a Invalid count -> %s of %s"):format(self.playerId, count, itemName))
-            end
+        count = ESX.Math.Round(count)
+        if count <= 0 then
+            return error(("Player ID:^5%s Tried remove a Invalid count -> %s of %s"):format(self.playerId, count, itemName))
         end
+
+        if item.count < count then
+            return false
+        end
+
+        item.count = item.count - count
+        self.weight = self.weight - (item.weight * count)
+        if self.weight < 0 then
+            self.weight = 0
+        end
+
+        Core.MarkPlayerDirty(self, "inventory")
+        Core.QueueInventorySync(self, item.name, item.count, -count, item.label)
+        Core.DebugCounter("inventory_mutations")
+
+        TriggerEvent("esx:onRemoveInventoryItem", self.source, item.name, item.count)
+        Core.DebugDuration("xPlayer.removeInventoryItem", startedAt)
+        return true
     end
 
     function self.setInventoryItem(itemName, count)
         local item = self.getInventoryItem(itemName)
 
+        count = ESX.Math.Round(count)
         if item and count >= 0 then
-            count = ESX.Math.Round(count)
-
-            if count > item.count then
-                self.addInventoryItem(item.name, count - item.count)
-            else
-                self.removeInventoryItem(item.name, item.count - count)
+            local delta = count - item.count
+            if delta == 0 then
+                return true
             end
+
+            if delta > 0 then
+                return self.addInventoryItem(item.name, delta)
+            end
+
+            return self.removeInventoryItem(item.name, -delta)
         end
+
+        return false
     end
 
     function self.getWeight()
@@ -527,15 +666,20 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
     end
 
     function self.canCarryItem(itemName, count)
-        if ESX.Items[itemName] then
-            local currentWeight, itemWeight = self.weight, ESX.Items[itemName].weight
-            local newWeight = currentWeight + (itemWeight * count)
-
-            return newWeight <= self.maxWeight
-        else
+        local itemDefinition = ESX.Items[itemName]
+        if not itemDefinition then
             print(('[^3WARNING^7] Item ^5"%s"^7 was used but does not exist!'):format(itemName))
             return false
         end
+
+        if type(count) ~= "number" or count <= 0 then
+            return false
+        end
+
+        local item = self.getInventoryItem(itemName)
+        local limit = item.limit or getItemLimit(itemName)
+
+        return limit == -1 or (item.count + count) <= limit
     end
 
     function self.canSwapItem(firstItem, firstItemCount, testItem, testItemCount)
@@ -548,14 +692,16 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
             return false
         end
 
-        if firstItemObject.count >= firstItemCount then
-            local weightWithoutFirstItem = ESX.Math.Round(self.weight - (firstItemObject.weight * firstItemCount))
-            local weightWithTestItem = ESX.Math.Round(weightWithoutFirstItem + (testItemObject.weight * testItemCount))
-
-            return weightWithTestItem <= self.maxWeight
+        if firstItemObject.count < firstItemCount then
+            return false
         end
 
-        return false
+        local limit = testItemObject.limit or getItemLimit(testItem)
+        if limit == -1 then
+            return true
+        end
+
+        return (testItemObject.count + testItemCount) <= limit
     end
 
     function self.setMaxWeight(newWeight)
@@ -597,6 +743,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
         }
 
         self.metadata.jobDuty = onDuty
+        Core.MarkPlayerDirty(self, "job")
         TriggerEvent("esx:setJob", self.source, self.job, lastJob)
         self.triggerEvent("esx:setJob", self.job, lastJob)
         Player(self.source).state:set("job", self.job, true)
@@ -615,6 +762,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
             })
 
             GiveWeaponToPed(GetPlayerPed(self.source), joaat(weaponName), ammo, false, false)
+            Core.MarkPlayerDirty(self, "loadout")
             self.triggerEvent("esx:addInventoryItem", weaponLabel, false, true)
             self.triggerEvent("esx:addLoadoutItem", weaponName, weaponLabel, ammo)
         end
@@ -631,6 +779,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
                     self.loadout[loadoutNum].components[#self.loadout[loadoutNum].components + 1] = weaponComponent
                     local componentHash = ESX.GetWeaponComponent(weaponName, weaponComponent).hash
                     GiveWeaponComponentToPed(GetPlayerPed(self.source), joaat(weaponName), componentHash)
+                    Core.MarkPlayerDirty(self, "loadout")
                     self.triggerEvent("esx:addInventoryItem", component.label, false, true)
                 end
             end
@@ -642,6 +791,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
         if weapon then
             weapon.ammo = weapon.ammo + ammoCount
+            Core.MarkPlayerDirty(self, "loadout")
             SetPedAmmo(GetPlayerPed(self.source), joaat(weaponName), weapon.ammo)
         end
     end
@@ -654,6 +804,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
         end
 
         weapon.ammo = ammoCount
+        Core.MarkPlayerDirty(self, "loadout")
 
         if weapon.ammo <= 0 then
             local _, weaponConfig = ESX.GetWeapon(weaponName)
@@ -671,6 +822,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
             if weaponObject.tints and weaponObject.tints[weaponTintIndex] then
                 self.loadout[loadoutNum].tintIndex = weaponTintIndex
+                Core.MarkPlayerDirty(self, "loadout")
                 self.triggerEvent("esx:setWeaponTint", weaponName, weaponTintIndex)
                 self.triggerEvent("esx:addInventoryItem", weaponObject.tints[weaponTintIndex], false, true)
             end
@@ -707,6 +859,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
                 SetPedAmmo(playerPed, weaponHash, 0)
 
                 table.remove(self.loadout, k)
+                Core.MarkPlayerDirty(self, "loadout")
                 break
             end
         end
@@ -732,6 +885,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
                         end
                     end
 
+                    Core.MarkPlayerDirty(self, "loadout")
                     self.triggerEvent("esx:removeWeaponComponent", weaponName, weaponComponent)
                     self.triggerEvent("esx:removeInventoryItem", component.label, false, true)
                 end
@@ -744,6 +898,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
 
         if weapon then
             weapon.ammo = weapon.ammo - ammoCount
+            Core.MarkPlayerDirty(self, "loadout")
             SetPedAmmo(GetPlayerPed(self.source), joaat(weaponName), weapon.ammo)
         end
     end
@@ -775,10 +930,9 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
     end
 
     function self.hasItem(item)
-        for _, v in ipairs(self.inventory) do
-            if v.name == item and v.count >= 1 then
-                return v, v.count
-            end
+        local inventoryItem = self.getInventoryItem(item)
+        if inventoryItem.count >= 1 then
+            return inventoryItem, inventoryItem.count
         end
 
         return false
@@ -885,6 +1039,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
             self.metadata[index][value] = subValue
         end
         self.triggerEvent('esx:updatePlayerData', 'metadata', self.metadata)
+        Core.MarkPlayerDirty(self, "metadata")
     end
 
     function self.clearMeta(index, subValues)
@@ -933,6 +1088,7 @@ function CreateExtendedPlayer(playerId, identifier, ssn, group, accounts, invent
             return error(("xPlayer.clearMeta ^5subValues^1 should be ^5string^1 or ^5table^1, received ^5%s^1!"):format(type(subValues)))
         end
         self.triggerEvent('esx:updatePlayerData', 'metadata', self.metadata)
+        Core.MarkPlayerDirty(self, "metadata")
     end
 
     function self.executeCommand(command)

@@ -1,4 +1,17 @@
 local pickups = {}
+local inventoryIndex = {}
+
+local function rebuildInventoryIndex()
+    inventoryIndex = {}
+
+    if not ESX.PlayerData.inventory then
+        return
+    end
+
+    for index = 1, #ESX.PlayerData.inventory do
+        inventoryIndex[ESX.PlayerData.inventory[index].name] = index
+    end
+end
 
 RegisterNetEvent("esx:requestModel", function(model)
     ESX.Streaming.RequestModel(model)
@@ -6,6 +19,7 @@ end)
 
 RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
     ESX.PlayerData = xPlayer
+    rebuildInventoryIndex()
 
     if not Config.Multichar then
         ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
@@ -59,6 +73,7 @@ end)
 
 ESX.SecureNetEvent("esx:setInventory", function(newInventory)
     ESX.SetPlayerData("inventory", newInventory)
+    rebuildInventoryIndex()
 end)
 
 local function onPlayerSpawn()
@@ -168,13 +183,30 @@ ESX.SecureNetEvent("esx:setAccountMoney", function(account)
 end)
 
 if not Config.CustomInventory then
-    ESX.SecureNetEvent("esx:addInventoryItem", function(item, count, showNotification)
-        for k, v in ipairs(ESX.PlayerData.inventory) do
-            if v.name == item then
-                ESX.UI.ShowInventoryItemNotification(true, v.label, count - v.count)
-                ESX.PlayerData.inventory[k].count = count
-                break
+    ESX.SecureNetEvent("esx:updateInventory", function(updates)
+        for i = 1, #updates do
+            local update = updates[i]
+            local index = inventoryIndex[update.name]
+
+            if index then
+                local inventoryItem = ESX.PlayerData.inventory[index]
+                if update.delta > 0 then
+                    ESX.UI.ShowInventoryItemNotification(true, inventoryItem.label, update.delta)
+                elseif update.delta < 0 then
+                    ESX.UI.ShowInventoryItemNotification(false, inventoryItem.label, -update.delta)
+                end
+
+                inventoryItem.count = update.count
             end
+        end
+    end)
+
+    ESX.SecureNetEvent("esx:addInventoryItem", function(item, count, showNotification)
+        local index = inventoryIndex[item]
+        if index then
+            local inventoryItem = ESX.PlayerData.inventory[index]
+            ESX.UI.ShowInventoryItemNotification(true, inventoryItem.label, count - inventoryItem.count)
+            inventoryItem.count = count
         end
 
         if showNotification then
@@ -183,12 +215,11 @@ if not Config.CustomInventory then
     end)
 
     ESX.SecureNetEvent("esx:removeInventoryItem", function(item, count, showNotification)
-        for i = 1, #ESX.PlayerData.inventory do
-            if ESX.PlayerData.inventory[i].name == item then
-                ESX.UI.ShowInventoryItemNotification(false, ESX.PlayerData.inventory[i].label, ESX.PlayerData.inventory[i].count - count)
-                ESX.PlayerData.inventory[i].count = count
-                break
-            end
+        local index = inventoryIndex[item]
+        if index then
+            local inventoryItem = ESX.PlayerData.inventory[index]
+            ESX.UI.ShowInventoryItemNotification(false, inventoryItem.label, inventoryItem.count - count)
+            inventoryItem.count = count
         end
 
         if showNotification then

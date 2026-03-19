@@ -198,61 +198,23 @@ end
 
 local function updateHealthAndArmorInMetadata(xPlayer)
     local ped = GetPlayerPed(xPlayer.source)
-    xPlayer.setMeta("health", GetEntityHealth(ped))
-    xPlayer.setMeta("armor", GetPedArmour(ped))
-    xPlayer.setMeta("lastPlaytime", xPlayer.getPlayTime())
-end
-
----@param xPlayer table
----@param cb? function
----@return nil
-function Core.SavePlayer(xPlayer, cb)
-    if not xPlayer.spawned then
-        return cb and cb()
-    end
-
-    updateHealthAndArmorInMetadata(xPlayer)
-    local parameters <const> = {
-        json.encode(xPlayer.getAccounts(true)),
-        xPlayer.job.name,
-        xPlayer.job.grade,
-        xPlayer.group,
-        json.encode(xPlayer.getCoords(false, true)),
-        json.encode(xPlayer.getInventory(true)),
-        json.encode(xPlayer.getLoadout(true)),
-        json.encode(xPlayer.getMeta()),
-        xPlayer.identifier,
-    }
-
-    MySQL.prepare(
-        "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?",
-        parameters,
-        function(affectedRows)
-            if affectedRows == 1 then
-                print(('[^2INFO^7] Saved player ^5"%s^7"'):format(xPlayer.name))
-                TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
-            end
-            if cb then
-                cb()
-            end
-        end
-    )
-end
-
----@param cb? function
----@return nil
-function Core.SavePlayers(cb)
-    local xPlayers <const> = ESX.Players
-    if not next(xPlayers) then
+    if not ped or ped == 0 then
         return
     end
 
-    local startTime <const> = os.time()
-    local parameters = {}
+    xPlayer.metadata.health = GetEntityHealth(ped)
+    xPlayer.metadata.armor = GetPedArmour(ped)
+    xPlayer.metadata.lastPlaytime = xPlayer.getPlayTime()
+end
 
-    for _, xPlayer in pairs(ESX.Players) do
-        updateHealthAndArmorInMetadata(xPlayer)
-        parameters[#parameters + 1] = {
+local savePlayerQuery = "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?"
+
+local function buildPlayerSaveQuery(xPlayer)
+    updateHealthAndArmorInMetadata(xPlayer)
+
+    return {
+        query = savePlayerQuery,
+        values = {
             json.encode(xPlayer.getAccounts(true)),
             xPlayer.job.name,
             xPlayer.job.grade,
@@ -263,24 +225,101 @@ function Core.SavePlayers(cb)
             json.encode(xPlayer.getMeta()),
             xPlayer.identifier,
         }
+    }
+end
+
+local function flushPlayerQueries(queries, onComplete)
+    if #queries == 0 then
+        if onComplete then
+            onComplete(true)
+        end
+        return
     end
 
-    MySQL.prepare(
-        "UPDATE `users` SET `accounts` = ?, `job` = ?, `job_grade` = ?, `group` = ?, `position` = ?, `inventory` = ?, `loadout` = ?, `metadata` = ? WHERE `identifier` = ?",
-        parameters,
-        function(results)
-            if not results then
-                return
-            end
+    local startedAt = GetGameTimer()
+    Core.DebugCounter("db_flush_requests")
 
-            if type(cb) == "function" then
-                return cb()
-            end
-
-            print(("[^2INFO^7] Saved ^5%s^7 %s over ^5%s^7 ms"):format(#parameters,
-                #parameters > 1 and "players" or "player", ESX.Math.Round((os.time() - startTime) / 1000000, 2)))
+    MySQL.transaction(queries, function(success)
+        Core.DebugDuration("db_flush", startedAt)
+        if onComplete then
+            onComplete(success == true)
         end
-    )
+    end)
+end
+
+local function hasDirtyFlags(xPlayer)
+    for _, dirty in pairs(xPlayer.dirtyFlags) do
+        if dirty then
+            return true
+        end
+    end
+
+    return false
+end
+
+---@param xPlayer table
+---@param cb? function
+---@param immediate? boolean
+---@return nil
+function Core.SavePlayer(xPlayer, cb, immediate)
+    if not xPlayer.spawned then
+        return cb and cb()
+    end
+
+    if not immediate then
+        Core.SaveQueue[xPlayer.source] = xPlayer
+        return cb and cb()
+    end
+
+    flushPlayerQueries({ buildPlayerSaveQuery(xPlayer) }, function(success)
+        if success then
+            Core.ClearPlayerDirtyFlags(xPlayer)
+            print(('[^2INFO^7] Saved player ^5"%s^7"'):format(xPlayer.name))
+            TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
+        end
+
+        if cb then
+            cb(success)
+        end
+    end)
+end
+
+---@param cb? function
+---@return nil
+function Core.SavePlayers(cb)
+    local parameters = {}
+    local savedPlayers = {}
+
+    for source, xPlayer in pairs(Core.SaveQueue) do
+        if xPlayer and xPlayer.spawned and hasDirtyFlags(xPlayer) then
+            parameters[#parameters + 1] = buildPlayerSaveQuery(xPlayer)
+            savedPlayers[#savedPlayers + 1] = source
+        else
+            Core.SaveQueue[source] = nil
+        end
+    end
+
+    if #parameters == 0 then
+        return cb and cb()
+    end
+
+    flushPlayerQueries(parameters, function(success)
+        if success then
+            for i = 1, #savedPlayers do
+                local xPlayer = ESX.Players[savedPlayers[i]]
+                if xPlayer then
+                    Core.ClearPlayerDirtyFlags(xPlayer)
+                    TriggerEvent("esx:playerSaved", xPlayer.playerId, xPlayer)
+                end
+            end
+        end
+
+        if type(cb) == "function" then
+            return cb(success)
+        end
+
+        print(("[^2INFO^7] Saved ^5%s^7 %s"):format(#parameters, #parameters > 1 and "players" or "player"))
+    end)
 end
 
 ESX.GetPlayers = GetPlayers
@@ -690,22 +729,18 @@ if not Config.CustomInventory then
                 end
             end
 
-            xPlayer.inventory = {}
-            local playerInvIndex = 1
             for itemName, itemData in pairs(ESX.Items) do
-                xPlayer.inventory[playerInvIndex] = {
-                    name = itemName,
-                    count = minimalInv[itemName] or 0,
-                    label = itemData.label,
-                    weight = itemData.weight,
-                    usable = Core.UsableItemsCallbacks[itemName] ~= nil,
-                    rare = itemData.rare,
-                    canRemove = itemData.canRemove,
-                }
-                playerInvIndex += 1
+                local inventoryItem = xPlayer.getInventoryItem(itemName)
+                inventoryItem.label = itemData.label
+                inventoryItem.weight = itemData.weight or 0
+                inventoryItem.limit = itemData.limit or Config.DefaultItemLimit
+                inventoryItem.usable = Core.UsableItemsCallbacks[itemName] ~= nil
+                inventoryItem.rare = itemData.rare
+                inventoryItem.canRemove = itemData.canRemove
             end
 
-            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.inventory)
+            xPlayer.inventoryArrayDirty = true
+            TriggerClientEvent("esx:setInventory", xPlayer.source, xPlayer.getInventory())
         end
     end
 
@@ -717,8 +752,13 @@ if not Config.CustomInventory then
         local itemCount = #items
         for i = 1, itemCount do
             local item = items[i]
-            ESX.Items[item.name] = { label = item.label, weight = item.weight, rare = item.rare, canRemove = item
-            .can_remove }
+            ESX.Items[item.name] = {
+                label = item.label,
+                weight = item.weight,
+                limit = item.limit or Config.DefaultItemLimit,
+                rare = item.rare,
+                canRemove = item.can_remove
+            }
         end
         refreshPlayerInventories()
 

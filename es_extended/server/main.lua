@@ -59,12 +59,19 @@ local function onPlayerJoined(playerId)
             )
         )
     else
-        local result = MySQL.scalar.await("SELECT 1 FROM users WHERE identifier = ?", { identifier })
-        if result then
-            loadESXPlayer(identifier, playerId, false)
-        else
-            createESXPlayer(identifier, playerId)
-        end
+        Core.EnqueueLogin(playerId, function()
+            MySQL.scalar("SELECT 1 FROM users WHERE identifier = ?", { identifier }, function(result)
+                if GetPlayerPing(playerId) <= 0 then
+                    return
+                end
+
+                if result then
+                    loadESXPlayer(identifier, playerId, false)
+                else
+                    createESXPlayer(identifier, playerId)
+                end
+            end)
+        end)
     end
 end
 
@@ -97,9 +104,11 @@ local function onPlayerDropped(playerId, reason, cb)
         GlobalState["playerCount"] = GlobalState["playerCount"] - 1
         ESX.Players[playerId] = nil
         Core.playersByIdentifier[xPlayer.identifier] = nil
+        Core.PlayerCache[playerId] = nil
+        Core.EventThrottle[playerId] = nil
 
         resolve()
-    end)
+    end, true)
 
     if p then
         return Citizen.Await(p)
@@ -116,11 +125,13 @@ if Config.Multichar then
 
         if not ESX.Players[src] then
             local identifier = char .. ":" .. ESX.GetIdentifier(src)
-            if data then
-                createESXPlayer(identifier, src, data)
-            else
-                loadESXPlayer(identifier, src, false)
-            end
+            Core.EnqueueLogin(src, function()
+                if data then
+                    createESXPlayer(identifier, src, data)
+                else
+                    loadESXPlayer(identifier, src, false)
+                end
+            end)
         end
     end)
 else
@@ -184,180 +195,165 @@ if not Config.Multichar then
 end
 
 function loadESXPlayer(identifier, playerId, isNew)
-    local userData = {
-        accounts = {},
-        inventory = {},
-        loadout = {},
-        weight = 0,
-        name = GetPlayerName(playerId),
-        identifier = identifier,
-        firstName = "John",
-        lastName = "Doe",
-        dateofbirth = "01/01/2000",
-        height = 120,
-        dead = false,
-    }
+    MySQL.prepare(loadPlayer, { identifier }, function(result)
+        if not result or GetPlayerPing(playerId) <= 0 then
+            return
+        end
 
-    local result = MySQL.prepare.await(loadPlayer, { identifier })
-
-    -- Accounts
-    local accounts = result.accounts
-    accounts = (accounts and accounts ~= "") and json.decode(accounts) or {}
-
-    for account, data in pairs(Config.Accounts) do
-        data.round = data.round or data.round == nil
-
-        local index = #userData.accounts + 1
-        userData.accounts[index] = {
-            name = account,
-            money = accounts[account] or Config.StartingAccountMoney[account] or 0,
-            label = data.label,
-            round = data.round,
-            index = index,
+        local userData = {
+            accounts = {},
+            inventory = {},
+            loadout = {},
+            weight = 0,
+            name = GetPlayerName(playerId),
+            identifier = identifier,
+            firstName = "John",
+            lastName = "Doe",
+            dateofbirth = "01/01/2000",
+            height = 120,
+            dead = false,
         }
-    end
 
-    -- SSN
-    userData.ssn = result.ssn
+        -- Accounts
+        local accounts = result.accounts
+        accounts = (accounts and accounts ~= "") and json.decode(accounts) or {}
 
-    -- Job
-    local job, grade = result.job, tostring(result.job_grade)
+        for account, data in pairs(Config.Accounts) do
+            data.round = data.round or data.round == nil
 
-    if not ESX.DoesJobExist(job, grade) then
-        print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
-        job, grade = "unemployed", "0"
-    end
-
-    local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
-
-    userData.job = {
-        id = jobObject.id,
-        name = jobObject.name,
-        label = jobObject.label,
-
-        grade = tonumber(grade),
-        grade_name = gradeObject.name,
-        grade_label = gradeObject.label,
-        grade_salary = gradeObject.salary,
-
-        skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
-        skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
-    }
-
-    -- Inventory
-    if not Config.CustomInventory then
-        local inventory = (result.inventory and result.inventory ~= "") and json.decode(result.inventory) or {}
-
-        for name, item in pairs(ESX.Items) do
-            local count = inventory[name] or 0
-            userData.weight += (count * item.weight)
-
-            userData.inventory[#userData.inventory + 1] = {
-                name = name,
-                count = count,
-                label = item.label,
-                weight = item.weight,
-                usable = Core.UsableItemsCallbacks[name] ~= nil,
-                rare = item.rare,
-                canRemove = item.canRemove,
+            local index = #userData.accounts + 1
+            userData.accounts[index] = {
+                name = account,
+                money = accounts[account] or Config.StartingAccountMoney[account] or 0,
+                label = data.label,
+                round = data.round,
+                index = index,
             }
         end
-        table.sort(userData.inventory, function(a, b)
-            return a.label < b.label
-        end)
-    elseif result.inventory and result.inventory ~= "" then
-        userData.inventory = json.decode(result.inventory)
-    end
 
-    -- Group
-    if result.group then
-        if result.group == "superadmin" then
-            userData.group = "admin"
-            print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
-        else
-            userData.group = result.group
+        -- SSN
+        userData.ssn = result.ssn
+
+        -- Job
+        local job, grade = result.job, tostring(result.job_grade)
+
+        if not ESX.DoesJobExist(job, grade) then
+            print(("[^3WARNING^7] Ignoring invalid job for ^5%s^7 [job: ^5%s^7, grade: ^5%s^7]"):format(identifier, job, grade))
+            job, grade = "unemployed", "0"
         end
-    else
-        userData.group = "user"
-    end
 
-    -- Loadout
-    if not Config.CustomInventory then
-        if result.loadout and result.loadout ~= "" then
+        local jobObject, gradeObject = ESX.Jobs[job], ESX.Jobs[job].grades[grade]
 
-            local loadout = json.decode(result.loadout)
-            for name, weapon in pairs(loadout) do
-                local label = ESX.GetWeaponLabel(name)
+        userData.job = {
+            id = jobObject.id,
+            name = jobObject.name,
+            label = jobObject.label,
 
-                if label then
-                    userData.loadout[#userData.loadout + 1] = {
-                        name = name,
-                        ammo = weapon.ammo,
-                        label = label,
-                        components = weapon.components or {},
-                        tintIndex = weapon.tintIndex or 0,
-                    }
+            grade = tonumber(grade),
+            grade_name = gradeObject.name,
+            grade_label = gradeObject.label,
+            grade_salary = gradeObject.salary,
+
+            skin_male = gradeObject.skin_male and json.decode(gradeObject.skin_male) or {},
+            skin_female = gradeObject.skin_female and json.decode(gradeObject.skin_female) or {},
+        }
+
+        -- Inventory
+        if result.inventory and result.inventory ~= "" then
+            userData.inventory = json.decode(result.inventory)
+        end
+
+        -- Group
+        if result.group then
+            if result.group == "superadmin" then
+                userData.group = "admin"
+                print("[^3WARNING^7] ^5Superadmin^7 detected, setting group to ^5admin^7")
+            else
+                userData.group = result.group
+            end
+        else
+            userData.group = "user"
+        end
+
+        -- Loadout
+        if not Config.CustomInventory then
+            if result.loadout and result.loadout ~= "" then
+
+                local loadout = json.decode(result.loadout)
+                for name, weapon in pairs(loadout) do
+                    local label = ESX.GetWeaponLabel(name)
+
+                    if label then
+                        userData.loadout[#userData.loadout + 1] = {
+                            name = name,
+                            ammo = weapon.ammo,
+                            label = label,
+                            components = weapon.components or {},
+                            tintIndex = weapon.tintIndex or 0,
+                        }
+                    end
                 end
             end
         end
-    end
 
-    -- Position
-    userData.coords = json.decode(result.position) or Config.DefaultSpawns[ESX.Math.Random(1,#Config.DefaultSpawns)]
+        -- Position
+        userData.coords = json.decode(result.position) or Config.DefaultSpawns[ESX.Math.Random(1,#Config.DefaultSpawns)]
 
-    -- Skin
-    userData.skin = (result.skin and result.skin ~= "") and json.decode(result.skin) or { sex = userData.sex == "f" and 1 or 0 }
+        -- Skin
+        userData.skin = (result.skin and result.skin ~= "") and json.decode(result.skin) or { sex = userData.sex == "f" and 1 or 0 }
 
-    -- Metadata
-    userData.metadata = (result.metadata and result.metadata ~= "") and json.decode(result.metadata) or {}
+        -- Metadata
+        userData.metadata = (result.metadata and result.metadata ~= "") and json.decode(result.metadata) or {}
 
-    -- xPlayer Creation
-    local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.ssn, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
+        -- xPlayer Creation
+        local xPlayer = CreateExtendedPlayer(playerId, identifier, userData.ssn, userData.group, userData.accounts, userData.inventory, userData.weight, userData.job, userData.loadout, GetPlayerName(playerId), userData.coords, userData.metadata)
 
-    GlobalState["playerCount"] = GlobalState["playerCount"] + 1
-    ESX.Players[playerId] = xPlayer
-    Core.playersByIdentifier[identifier] = xPlayer
+        GlobalState["playerCount"] = GlobalState["playerCount"] + 1
+        ESX.Players[playerId] = xPlayer
+        Core.playersByIdentifier[identifier] = xPlayer
 
-    -- Identity
-    if result.firstname and result.firstname ~= "" then
-        userData.firstName = result.firstname
-        userData.lastName = result.lastname
+        -- Identity
+        if result.firstname and result.firstname ~= "" then
+            userData.firstName = result.firstname
+            userData.lastName = result.lastname
 
-        local name = ("%s %s"):format(result.firstname, result.lastname)
-        userData.name = name
+            local name = ("%s %s"):format(result.firstname, result.lastname)
+            userData.name = name
 
-        xPlayer.set("firstName", result.firstname)
-        xPlayer.set("lastName", result.lastname)
-        xPlayer.setName(name)
+            xPlayer.set("firstName", result.firstname)
+            xPlayer.set("lastName", result.lastname)
+            xPlayer.setName(name)
 
-        if result.dateofbirth then
-            userData.dateofbirth = result.dateofbirth
-            xPlayer.set("dateofbirth", result.dateofbirth)
+            if result.dateofbirth then
+                userData.dateofbirth = result.dateofbirth
+                xPlayer.set("dateofbirth", result.dateofbirth)
+            end
+            if result.sex then
+                userData.sex = result.sex
+                xPlayer.set("sex", result.sex)
+            end
+            if result.height then
+                userData.height = result.height
+                xPlayer.set("height", result.height)
+            end
         end
-        if result.sex then
-            userData.sex = result.sex
-            xPlayer.set("sex", result.sex)
+
+        userData.inventory = xPlayer.getInventory()
+        TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
+        userData.money = xPlayer.getMoney()
+        userData.maxWeight = xPlayer.getMaxWeight()
+        userData.variables = xPlayer.variables or {}
+        xPlayer.triggerEvent("esx:playerLoaded", userData, isNew, userData.skin)
+
+        if not Config.CustomInventory then
+            xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
+        elseif setPlayerInventory then
+            setPlayerInventory(playerId, xPlayer, userData.inventory, isNew)
         end
-        if result.height then
-            userData.height = result.height
-            xPlayer.set("height", result.height)
-        end
-    end
 
-    TriggerEvent("esx:playerLoaded", playerId, xPlayer, isNew)
-    userData.money = xPlayer.getMoney()
-    userData.maxWeight = xPlayer.getMaxWeight()
-    userData.variables = xPlayer.variables or {}
-    xPlayer.triggerEvent("esx:playerLoaded", userData, isNew, userData.skin)
-
-    if not Config.CustomInventory then
-        xPlayer.triggerEvent("esx:createMissingPickups", Core.Pickups)
-    elseif setPlayerInventory then
-        setPlayerInventory(playerId, xPlayer, userData.inventory, isNew)
-    end
-
-    xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
-    print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+        xPlayer.triggerEvent("esx:registerSuggestions", Core.RegisteredCommands)
+        print(('[^2INFO^0] Player ^5"%s"^0 has connected to the server. ID: ^5%s^7'):format(xPlayer.getName(), playerId))
+    end)
 end
 
 AddEventHandler("chatMessage", function(playerId, _, message)
@@ -404,6 +400,10 @@ end)
 
 if not Config.CustomInventory then
     RegisterNetEvent("esx:updateWeaponAmmo", function(weaponName, ammoCount)
+        if not Core.AllowPlayerEvent(source, "updateWeaponAmmo", Config.EventThrottle.updateWeaponAmmo) then
+            return
+        end
+
         local xPlayer = ESX.GetPlayerFromId(source)
 
         if xPlayer then
@@ -413,6 +413,10 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:giveInventoryItem", function(target, itemType, itemName, itemCount)
         local playerId = source
+        if not Core.AllowPlayerEvent(playerId, "giveItem", Config.EventThrottle.giveItem) then
+            return
+        end
+
         local sourceXPlayer = ESX.GetPlayerFromId(playerId)
         local targetXPlayer = ESX.GetPlayerFromId(target)
         local distance = #(GetEntityCoords(GetPlayerPed(playerId)) - GetEntityCoords(GetPlayerPed(target)))
@@ -527,6 +531,10 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:removeInventoryItem", function(itemType, itemName, itemCount)
         local playerId = source
+        if not Core.AllowPlayerEvent(playerId, "removeInventory", Config.EventThrottle.removeInventory) then
+            return
+        end
+
         local xPlayer = ESX.GetPlayerFromId(playerId)
 
         if not xPlayer then
@@ -600,6 +608,10 @@ if not Config.CustomInventory then
 
     RegisterNetEvent("esx:useItem", function(itemName)
         local source = source
+        if not Core.AllowPlayerEvent(source, "useItem", Config.EventThrottle.useItem) then
+            return
+        end
+
         local xPlayer = ESX.GetPlayerFromId(source)
 
         if not xPlayer then
@@ -616,6 +628,10 @@ if not Config.CustomInventory then
     end)
 
     RegisterNetEvent("esx:onPickup", function(pickupId)
+        if not Core.AllowPlayerEvent(source, "pickup", Config.EventThrottle.pickup) then
+            return
+        end
+
         local pickup, xPlayer, success = Core.Pickups[pickupId], ESX.GetPlayerFromId(source)
 
         if not xPlayer then
