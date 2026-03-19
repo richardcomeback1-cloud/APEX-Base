@@ -41,10 +41,6 @@ function Adjustments:HealthRegeneration()
     end
 end
 
-function Adjustments:FrameLoop()
-    return false
-end
-
 function Adjustments:EnablePvP()
     if Config.EnablePVP then
         SetCanAttackFriendly(ESX.PlayerData.ped, true, false)
