@@ -1147,16 +1147,46 @@ local function getAmmoTypeDefaults(weaponData)
     return ammoTypeDefaults[tostring(ammoData.hash)]
 end
 
+local function inferWeaponType(name, data)
+    if data.type and data.type ~= "unknown" then
+        return data.type
+    end
+
+    if data.throwable then
+        return "throwable"
+    end
+
+    local upperName = string.upper(name)
+    for weaponType, patterns in pairs(Config.WeaponTypeNamePatterns or {}) do
+        for i = 1, #patterns do
+            if upperName:find(patterns[i], 1, true) then
+                return weaponType
+            end
+        end
+    end
+
+    local ammoDefaults = getAmmoTypeDefaults(data)
+    return ammoDefaults and ammoDefaults.type or "unknown"
+end
+
 local function normalizeWeaponConfig(name, data)
     local ammoDefaults = getAmmoTypeDefaults(data)
+    local weaponType = inferWeaponType(name, data)
+    local typeDefaults = (Config.WeaponTypeDefaults and Config.WeaponTypeDefaults[weaponType]) or Config.WeaponTypeDefaults.unknown
     local weaponData = {
         label = data.label or name,
-        type = data.type or (data.throwable and "throwable") or (ammoDefaults and ammoDefaults.type) or "unknown",
-        maxAmmo = data.maxAmmo or (ammoDefaults and ammoDefaults.maxAmmo) or ((data.throwable and 25) or 250),
+        type = weaponType,
+        maxAmmo = data.maxAmmo or (ammoDefaults and ammoDefaults.maxAmmo) or typeDefaults.maxAmmo or ((data.throwable and 25) or 250),
         throwable = data.throwable or false,
         ammo = data.ammo,
         tints = data.tints,
         components = data.components or {},
+        minFireInterval = data.minFireInterval or typeDefaults.minFireInterval or 120,
+        maxRange = data.maxRange or typeDefaults.maxRange or 120.0,
+        minDamage = data.minDamage or typeDefaults.minDamage or 0,
+        maxDamage = data.maxDamage or typeDefaults.maxDamage or 75,
+        spreadTolerance = data.spreadTolerance or typeDefaults.spreadTolerance or 0.0035,
+        recoilTolerance = data.recoilTolerance or typeDefaults.recoilTolerance or 8.0,
     }
 
     weaponData.name = name

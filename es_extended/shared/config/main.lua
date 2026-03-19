@@ -75,6 +75,44 @@ Config.EventThrottle = {
     pickup = 250,
     updateWeaponAmmo = 200,
 }
+Config.WeaponStatebagInterval = 200 -- client-to-server weapon telemetry throttle in milliseconds
+Config.WeaponTelemetryWindow = 4000 -- rolling telemetry window per player in milliseconds
+Config.WeaponAutoDetect = true -- automatically scan resources for addon weapon meta files
+Config.WeaponAutoDetectFiles = {
+    "weapons.meta",
+    "weaponcomponents.meta",
+    "stream/weapons.meta",
+    "stream/weaponcomponents.meta",
+}
+Config.WeaponTypeNamePatterns = {
+    pistol = { "PISTOL", "REVOLVER" },
+    rifle = { "RIFLE", "CARBINE", "M4", "AK", "BULLPUP" },
+    smg = { "SMG", "PDW", "MACHINEPISTOL" },
+    shotgun = { "SHOTGUN" },
+    sniper = { "SNIPER", "MARKSMAN" },
+    throwable = { "GRENADE", "MOLOTOV", "STICKY", "BOMB", "MINE", "SNOWBALL", "BZGAS", "BALL", "FLARE" },
+}
+Config.WeaponTypeDefaults = {
+    unknown = { maxAmmo = 250, minFireInterval = 120, maxRange = 120.0, minDamage = 0, maxDamage = 75, spreadTolerance = 0.0035, recoilTolerance = 8.0 },
+    melee = { maxAmmo = 0, minFireInterval = 350, maxRange = 3.5, minDamage = 1, maxDamage = 60, spreadTolerance = 0.0, recoilTolerance = 0.0 },
+    pistol = { maxAmmo = 250, minFireInterval = 110, maxRange = 90.0, minDamage = 1, maxDamage = 55, spreadTolerance = 0.0032, recoilTolerance = 7.5 },
+    smg = { maxAmmo = 500, minFireInterval = 65, maxRange = 110.0, minDamage = 1, maxDamage = 45, spreadTolerance = 0.0045, recoilTolerance = 8.5 },
+    rifle = { maxAmmo = 500, minFireInterval = 85, maxRange = 180.0, minDamage = 1, maxDamage = 65, spreadTolerance = 0.0040, recoilTolerance = 9.0 },
+    shotgun = { maxAmmo = 120, minFireInterval = 260, maxRange = 40.0, minDamage = 2, maxDamage = 120, spreadTolerance = 0.0090, recoilTolerance = 12.0 },
+    sniper = { maxAmmo = 50, minFireInterval = 900, maxRange = 450.0, minDamage = 10, maxDamage = 160, spreadTolerance = 0.0010, recoilTolerance = 5.0 },
+    launcher = { maxAmmo = 20, minFireInterval = 800, maxRange = 350.0, minDamage = 20, maxDamage = 250, spreadTolerance = 0.0120, recoilTolerance = 14.0 },
+    throwable = { maxAmmo = 25, minFireInterval = 500, maxRange = 60.0, minDamage = 5, maxDamage = 150, spreadTolerance = 0.0080, recoilTolerance = 6.0 },
+    utility = { maxAmmo = 4500, minFireInterval = 150, maxRange = 25.0, minDamage = 0, maxDamage = 10, spreadTolerance = 0.0, recoilTolerance = 0.0 },
+    heavy = { maxAmmo = 9999, minFireInterval = 55, maxRange = 220.0, minDamage = 1, maxDamage = 90, spreadTolerance = 0.0060, recoilTolerance = 12.0 },
+}
+Config.WeaponAntiCheat = {
+    enabled = true,
+    maxAmmoDeltaMultiplier = 1.0, -- maximum allowed positive delta relative to weapon max ammo
+    perfectPatternThreshold = 6, -- consecutive low-variance samples before recoil/spread flag
+    suspiciousScoreLimit = 5, -- threshold before a player is considered suspicious for weapon cheats
+    damageGraceMultiplier = 1.25, -- allowed damage variance over configured max damage
+    impossibleFireRateGrace = 20, -- extra milliseconds tolerated under configured min fire interval
+}
 Config.SaveDeathStatus = true -- Save the death status of a player
 Config.EnableDebug = false -- Use Debug options?
 Config.EnablePerformanceDebug = false -- track counters and slow-path warnings

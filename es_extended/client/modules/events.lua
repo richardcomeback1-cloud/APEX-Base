@@ -11,6 +11,17 @@ local ammoState = {
     pending = {},
     currentWeapon = false,
 }
+local weaponTelemetryState = {
+    lastWeapon = false,
+    shotCount = 0,
+    lastShotAt = 0,
+    minInterval = 0,
+    accumulatedRecoil = 0.0,
+    accumulatedSpread = 0.0,
+    lastCamRot = false,
+    lastSentAt = 0,
+}
+local resetWeaponTelemetry
 
 local function getPickupBucketKey(coords)
     return ("%s:%s"):format(
@@ -128,6 +139,7 @@ end)
 RegisterNetEvent("esx:playerLoaded", function(xPlayer, _, skin)
     ESX.PlayerData = xPlayer
     rebuildInventoryIndex()
+    resetWeaponTelemetry(false)
 
     ESX.SpawnPlayer(skin, ESX.PlayerData.coords, function()
         TriggerEvent("esx:onPlayerSpawn")
@@ -169,6 +181,7 @@ ESX.SecureNetEvent("esx:onPlayerLogout", function()
     ESX.PlayerLoaded = false
     isFirstSpawn = true
     clearPickupRenderState()
+    resetWeaponTelemetry(false)
 end)
 
 ESX.SecureNetEvent("esx:setMaxWeight", function(newMaxWeight)
@@ -203,6 +216,71 @@ local function syncWeaponAmmoState(weaponName, force)
     LocalPlayer.state:set(("ammo:%s"):format(weaponName), currentAmmo, true)
 end
 
+function resetWeaponTelemetry(weaponName)
+    weaponTelemetryState.lastWeapon = weaponName or false
+    weaponTelemetryState.shotCount = 0
+    weaponTelemetryState.lastShotAt = 0
+    weaponTelemetryState.minInterval = 0
+    weaponTelemetryState.accumulatedRecoil = 0.0
+    weaponTelemetryState.accumulatedSpread = 0.0
+    weaponTelemetryState.lastCamRot = GetGameplayCamRot(2)
+end
+
+local function syncWeaponTelemetry(force)
+    if Config.CustomInventory or not ESX.PlayerLoaded or not ESX.PlayerData.ped then
+        return
+    end
+
+    local weaponName = ammoState.currentWeapon
+    if not weaponName then
+        return
+    end
+
+    local now = GetGameTimer()
+    if not force and (now - weaponTelemetryState.lastSentAt) < Config.WeaponStatebagInterval then
+        return
+    end
+
+    weaponTelemetryState.lastSentAt = now
+    LocalPlayer.state:set("weapon:stats", {
+        weapon = weaponName,
+        shots = weaponTelemetryState.shotCount,
+        minInterval = weaponTelemetryState.minInterval,
+        recoil = weaponTelemetryState.accumulatedRecoil,
+        spread = weaponTelemetryState.accumulatedSpread,
+        timestamp = now,
+    }, true)
+end
+
+local function trackWeaponShot()
+    if not ammoState.currentWeapon or not ESX.PlayerData.ped then
+        return
+    end
+
+    local now = GetGameTimer()
+    if weaponTelemetryState.lastShotAt > 0 and (now - weaponTelemetryState.lastShotAt) < 20 then
+        return
+    end
+
+    local camRot = GetGameplayCamRot(2)
+    local lastCamRot = weaponTelemetryState.lastCamRot or camRot
+    local recoilDelta = math.abs(camRot.x - lastCamRot.x) + math.abs(camRot.y - lastCamRot.y)
+    local spreadDelta = math.abs(camRot.z - lastCamRot.z) * 0.001
+
+    if weaponTelemetryState.lastShotAt > 0 then
+        local interval = now - weaponTelemetryState.lastShotAt
+        if weaponTelemetryState.minInterval == 0 or interval < weaponTelemetryState.minInterval then
+            weaponTelemetryState.minInterval = interval
+        end
+    end
+
+    weaponTelemetryState.shotCount += 1
+    weaponTelemetryState.lastShotAt = now
+    weaponTelemetryState.accumulatedRecoil += recoilDelta
+    weaponTelemetryState.accumulatedSpread += spreadDelta
+    weaponTelemetryState.lastCamRot = camRot
+end
+
 local function scheduleWeaponAmmoSync(weaponName, delay, force)
     if ammoState.pending[weaponName] then
         return
@@ -223,18 +301,22 @@ AddEventHandler("esx:weaponChanged", function(weaponHash)
 
     if not weaponHash or weaponHash == false or weaponHash == `WEAPON_UNARMED` then
         ammoState.currentWeapon = false
+        resetWeaponTelemetry(false)
         return
     end
 
     local weaponConfig = ESX.GetWeaponFromHash(weaponHash)
     if not weaponConfig then
         ammoState.currentWeapon = false
+        resetWeaponTelemetry(false)
         return
     end
 
     ammoState.currentWeapon = weaponConfig.name
     ammoState.lastAmmo[weaponConfig.name] = nil
+    resetWeaponTelemetry(weaponConfig.name)
     scheduleWeaponAmmoSync(weaponConfig.name, 0, true)
+    syncWeaponTelemetry(true)
 end)
 
 AddEventHandler("gameEventTriggered", function(eventName)
@@ -248,12 +330,38 @@ AddEventHandler("gameEventTriggered", function(eventName)
     end
 
     if eventName == "CEventGunShot" or eventName == "CEventGunReload" or IsPedShooting(ESX.PlayerData.ped) or IsPedReloading(ESX.PlayerData.ped) then
+        if IsPedShooting(ESX.PlayerData.ped) then
+            trackWeaponShot()
+            syncWeaponTelemetry(false)
+        end
+
         scheduleWeaponAmmoSync(weaponName, IsPedReloading(ESX.PlayerData.ped) and 250 or 0, false)
     end
 
     if eventName == "CEventParachuteDeploy" or eventName == "CEventParachuteLanding" then
         ammoState.lastAmmo.GADGET_PARACHUTE = nil
         scheduleWeaponAmmoSync("GADGET_PARACHUTE", 0, true)
+    end
+end)
+
+CreateThread(function()
+    while true do
+        Wait(Config.WeaponStatebagInterval)
+
+        if not ESX.PlayerLoaded or Config.CustomInventory or not ESX.PlayerData.ped or not ammoState.currentWeapon then
+            goto continue
+        end
+
+        if IsPedShooting(ESX.PlayerData.ped) then
+            trackWeaponShot()
+        end
+
+        if IsPedShooting(ESX.PlayerData.ped) or IsPedReloading(ESX.PlayerData.ped) then
+            scheduleWeaponAmmoSync(ammoState.currentWeapon, 0, false)
+            syncWeaponTelemetry(false)
+        end
+
+        ::continue::
     end
 end)
 

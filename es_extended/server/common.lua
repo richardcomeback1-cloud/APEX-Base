@@ -21,6 +21,10 @@ Core.PlayerSyncScheduled = false
 Core.EventThrottle = {}
 Core.PlayerCoords = {}
 Core.PlayerScopeBuckets = {}
+Core.DetectedWeapons = {}
+Core.WeaponScanCache = {}
+Core.WeaponTelemetry = {}
+Core.WeaponFlags = {}
 Core.Performance = {
     counters = {},
     slowPaths = {},
@@ -380,6 +384,128 @@ function Core.AllowPlayerEvent(playerId, eventName, cooldown)
     return true
 end
 
+local function extractWeaponNamesFromMeta(content)
+    local detected = {}
+    if not content or content == "" then
+        return detected
+    end
+
+    for weaponName in content:gmatch("<Name>%s*(WEAPON_[%u%d_]+)%s*</Name>") do
+        detected[weaponName] = true
+    end
+
+    for weaponName in content:gmatch("WEAPON_[%u%d_]+") do
+        detected[weaponName] = true
+    end
+
+    return detected
+end
+
+local function getWeaponAutoDefaults(weaponName)
+    local inferredType = "unknown"
+    local patterns = Config.WeaponTypeNamePatterns or {}
+    local upperName = string.upper(weaponName)
+
+    for weaponType, entries in pairs(patterns) do
+        for i = 1, #entries do
+            if upperName:find(entries[i], 1, true) then
+                inferredType = weaponType
+                goto foundType
+            end
+        end
+    end
+
+    ::foundType::
+    local defaults = (Config.WeaponTypeDefaults and Config.WeaponTypeDefaults[inferredType]) or Config.WeaponTypeDefaults.unknown
+    return inferredType, defaults
+end
+
+local function detectWeaponsInResource(resourceName)
+    if Core.WeaponScanCache[resourceName] then
+        return
+    end
+
+    Core.WeaponScanCache[resourceName] = true
+    local discovered = {}
+
+    for i = 1, #Config.WeaponAutoDetectFiles do
+        local fileName = Config.WeaponAutoDetectFiles[i]
+        local content = LoadResourceFile(resourceName, fileName)
+        if content then
+            local weaponNames = extractWeaponNamesFromMeta(content)
+            for weaponName in pairs(weaponNames) do
+                discovered[weaponName] = true
+            end
+        end
+    end
+
+    for weaponName in pairs(discovered) do
+        if not Core.DetectedWeapons[weaponName] then
+            local weaponType, defaults = getWeaponAutoDefaults(weaponName)
+            RegisterAddonWeapon(weaponName, {
+                label = weaponName,
+                type = weaponType,
+                maxAmmo = defaults.maxAmmo,
+                minFireInterval = defaults.minFireInterval,
+                maxRange = defaults.maxRange,
+                minDamage = defaults.minDamage,
+                maxDamage = defaults.maxDamage,
+                spreadTolerance = defaults.spreadTolerance,
+                recoilTolerance = defaults.recoilTolerance,
+            })
+            Core.DetectedWeapons[weaponName] = true
+        end
+    end
+end
+
+function Core.ScanAddonWeapons()
+    if not Config.WeaponAutoDetect then
+        return
+    end
+
+    local resourceCount = GetNumResources()
+    for i = 0, resourceCount - 1 do
+        local resourceName = GetResourceByFindIndex(i)
+        if resourceName and resourceName ~= GetCurrentResourceName() then
+            detectWeaponsInResource(resourceName)
+        end
+    end
+end
+
+AddEventHandler("onServerResourceStart", function(resourceName)
+    if Config.WeaponAutoDetect then
+        detectWeaponsInResource(resourceName)
+    end
+end)
+
+function Core.FlagPlayerWeapon(playerId, reason, context)
+    local flags = Core.WeaponFlags[playerId] or { score = 0, reasons = {} }
+    flags.score += 1
+    flags.lastReason = reason
+    flags.lastContext = context
+    flags.reasons[reason] = (flags.reasons[reason] or 0) + 1
+    flags.updatedAt = GetGameTimer()
+    Core.WeaponFlags[playerId] = flags
+
+    print(("[^3ANTICHEAT^7] Player %s flagged for %s (score=%s)"):format(playerId, reason, flags.score))
+    return flags.score
+end
+
+function Core.GetPlayerWeaponTelemetry(playerId)
+    local telemetry = Core.WeaponTelemetry[playerId]
+    if not telemetry then
+        telemetry = {
+            lastWeapon = false,
+            lastShotAt = {},
+            lastAmmoAt = {},
+            suspiciousScore = 0,
+        }
+        Core.WeaponTelemetry[playerId] = telemetry
+    end
+
+    return telemetry
+end
+
 MySQL.ready(function()
     Core.DatabaseConnected = true
 
@@ -388,6 +514,7 @@ MySQL.ready(function()
     end
 
     ESX.RefreshJobs()
+    Core.ScanAddonWeapons()
 
     print(("[^2INFO^7] ESX ^5Legacy %s^0 initialized!"):format(GetResourceMetadata(GetCurrentResourceName(), "version", 0)))
 

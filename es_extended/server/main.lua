@@ -16,9 +16,17 @@ end
 
 loadPlayer = loadPlayer .. " FROM `users` WHERE identifier = ?"
 
+local function revertWeaponAmmoState(source, key, weapon)
+    Player(source).state:set(key, weapon and weapon.ammo or 0, true)
+end
+
+local function getPlayerWeaponTelemetry(source)
+    return Core.GetPlayerWeaponTelemetry(source)
+end
+
 if not Config.CustomInventory then
     AddStateBagChangeHandler(nil, nil, function(bagName, key, value, _, replicated)
-        if not replicated or type(key) ~= "string" or key:sub(1, 5) ~= "ammo:" then
+        if not replicated or type(key) ~= "string" then
             return
         end
 
@@ -32,16 +40,70 @@ if not Config.CustomInventory then
             return
         end
 
+        if key == "weapon:stats" then
+            if type(value) ~= "table" or type(value.weapon) ~= "string" then
+                return
+            end
+
+            local weaponConfig = GetWeaponConfig(value.weapon)
+            if not weaponConfig then
+                Core.FlagPlayerWeapon(source, "invalid_weapon_telemetry", value.weapon)
+                return
+            end
+
+            local telemetry = getPlayerWeaponTelemetry(source)
+            local shotCount = math.max(0, math.floor(tonumber(value.shots) or 0))
+            local minInterval = math.max(0, math.floor(tonumber(value.minInterval) or weaponConfig.minFireInterval or 0))
+            local recoil = math.abs(tonumber(value.recoil) or 0.0)
+            local spread = math.abs(tonumber(value.spread) or 0.0)
+            local suspiciousScore = 0
+
+            if shotCount > 0 and minInterval > 0 and minInterval < ((weaponConfig.minFireInterval or 0) - Config.WeaponAntiCheat.impossibleFireRateGrace) then
+                suspiciousScore += 2
+                Core.FlagPlayerWeapon(source, "impossible_fire_rate", {
+                    weapon = value.weapon,
+                    minInterval = minInterval,
+                    expected = weaponConfig.minFireInterval,
+                })
+            end
+
+            if shotCount >= Config.WeaponAntiCheat.perfectPatternThreshold and recoil <= (weaponConfig.recoilTolerance * 0.15) then
+                suspiciousScore += 1
+                Core.FlagPlayerWeapon(source, "perfect_recoil_pattern", {
+                    weapon = value.weapon,
+                    recoil = recoil,
+                })
+            end
+
+            if shotCount >= Config.WeaponAntiCheat.perfectPatternThreshold and spread <= (weaponConfig.spreadTolerance * 0.15) then
+                suspiciousScore += 1
+                Core.FlagPlayerWeapon(source, "perfect_spread_pattern", {
+                    weapon = value.weapon,
+                    spread = spread,
+                })
+            end
+
+            telemetry.lastWeapon = value.weapon
+            telemetry.lastTelemetryAt = GetGameTimer()
+            telemetry.suspiciousScore = (telemetry.suspiciousScore or 0) + suspiciousScore
+            return
+        end
+
+        if key:sub(1, 5) ~= "ammo:" then
+            return
+        end
+
         local weaponName = key:sub(6)
         local weaponConfig = GetWeaponConfig(weaponName)
         local weapon = xPlayer.loadout[weaponName]
         if not weaponConfig then
-            Player(source).state:set(key, weapon and weapon.ammo or 0, true)
+            Core.FlagPlayerWeapon(source, "invalid_weapon_ammo", weaponName)
+            revertWeaponAmmoState(source, key, weapon)
             return
         end
 
         if not weapon or type(value) ~= "number" then
-            Player(source).state:set(key, weapon and weapon.ammo or 0, true)
+            revertWeaponAmmoState(source, key, weapon)
             return
         end
 
@@ -61,16 +123,70 @@ if not Config.CustomInventory then
         end
 
         local lastServerAmmo = weapon.ammo or 0
-        if ammoCount < 0 or ammoCount > maxAmmo or ammoCount > (lastServerAmmo + maxAmmo) then
-            Player(source).state:set(key, lastServerAmmo, true)
+        local maxPositiveDelta = math.max(1, math.floor(maxAmmo * Config.WeaponAntiCheat.maxAmmoDeltaMultiplier))
+        if ammoCount < 0 or ammoCount > maxAmmo or math.abs(ammoCount - lastServerAmmo) > maxPositiveDelta then
+            Core.FlagPlayerWeapon(source, "invalid_ammo_delta", {
+                weapon = weaponName,
+                ammo = ammoCount,
+                serverAmmo = lastServerAmmo,
+                maxAmmo = maxAmmo,
+            })
+            revertWeaponAmmoState(source, key, weapon)
             return
         end
 
         ammoSync.acceptedAt[weaponName] = now
         ammoSync.lastClientAmmo[weaponName] = ammoCount
+        getPlayerWeaponTelemetry(source).lastAmmoAt[weaponName] = now
         xPlayer.updateWeaponAmmo(weaponName, ammoCount)
     end)
 end
+
+AddEventHandler("weaponDamageEvent", function(sender, data)
+    if not Config.WeaponAntiCheat.enabled or type(data) ~= "table" then
+        return
+    end
+
+    local weaponConfig = ESX.GetWeaponFromHash(data.weaponType)
+    if not weaponConfig then
+        return
+    end
+
+    local telemetry = getPlayerWeaponTelemetry(sender)
+    local playerCoords = Core.PlayerCoords[sender]
+    local damage = tonumber(data.weaponDamage) or 0
+    local maxAllowedDamage = (weaponConfig.maxDamage or 0) * Config.WeaponAntiCheat.damageGraceMultiplier
+    local distance = 0.0
+
+    if playerCoords and data.hitGlobalId and NetworkGetEntityFromNetworkId then
+        local targetEntity = NetworkGetEntityFromNetworkId(data.hitGlobalId)
+        if targetEntity and targetEntity ~= 0 then
+            distance = #(playerCoords.coords - GetEntityCoords(targetEntity))
+        end
+    end
+
+    if damage > maxAllowedDamage then
+        Core.FlagPlayerWeapon(sender, "invalid_weapon_damage", {
+            weapon = weaponConfig.name,
+            damage = damage,
+            maxDamage = maxAllowedDamage,
+        })
+        CancelEvent()
+        return
+    end
+
+    if distance > (weaponConfig.maxRange or 9999.0) then
+        Core.FlagPlayerWeapon(sender, "invalid_weapon_range", {
+            weapon = weaponConfig.name,
+            distance = distance,
+            maxRange = weaponConfig.maxRange,
+        })
+        CancelEvent()
+        return
+    end
+
+    telemetry.lastWeapon = weaponConfig.name
+end)
 
 local function createESXPlayer(identifier, playerId)
     local accounts = {}
